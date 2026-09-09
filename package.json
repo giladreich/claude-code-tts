@@ -1,0 +1,904 @@
+{
+  "name": "claude-code-tts",
+  "displayName": "Claude Code TTS",
+  "description": "Speaks Claude Code's prose output and tool actions aloud (text-to-speech). Reads text, not code.",
+  "version": "1.0.0",
+  "publisher": "giladreich",
+  "license": "MIT",
+  "icon": "assets/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/giladreich/claude-code-tts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/giladreich/claude-code-tts/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "text-to-speech",
+    "tts",
+    "voice",
+    "accessibility",
+    "speech",
+    "cli",
+    "terminal",
+    "narration",
+    "local",
+    "offline",
+    "voice-cloning"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeCodeTts.checkSetup",
+        "title": "Check Setup",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.languageVoice",
+        "title": "Set Voice for a Language",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.toggle",
+        "title": "Toggle Speech",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.stop",
+        "title": "Stop Speaking",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.skip",
+        "title": "Skip Current Utterance",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.rateUp",
+        "title": "Speak Faster",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.rateDown",
+        "title": "Speak Slower",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.selectVoice",
+        "title": "Select Voice",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.selectRate",
+        "title": "Set Speech Rate",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.repeatLast",
+        "title": "Repeat Last Message",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.speakSelection",
+        "title": "Speak Selection (from the editor or clipboard)",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.speakClipboard",
+        "title": "Speak Clipboard",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.pauseResume",
+        "title": "Pause or Resume",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.history",
+        "title": "Recent Messages",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.menu",
+        "title": "Menu",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.resetSettings",
+        "title": "Reset Settings to Defaults",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.removeEverything",
+        "title": "Remove Everything Claude Code TTS Added",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.selectEngine",
+        "title": "Choose Voice Engine",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.downloadVoice",
+        "title": "Download Piper Voice",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.setupBestVoice",
+        "title": "Set Up the Best Voice",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.setupKokoro",
+        "title": "Set Up Kokoro Engine",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.setupQwen3",
+        "title": "Set Up Qwen3 Engine",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.setupChatterbox",
+        "title": "Set Up Chatterbox Engine",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.setupTranslation",
+        "title": "Set Up Translation",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.toggleNotifications",
+        "title": "Toggle Completion Sounds",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.configureSounds",
+        "title": "Configure Notification Sounds",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.manageVoices",
+        "title": "My Voices",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.designVoice",
+        "title": "Design a Voice from a Description",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.cloneVoice",
+        "title": "Clone My Voice",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.cloneVoiceFromFile",
+        "title": "Clone Voice from an Audio or Video File",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.storage",
+        "title": "Storage and Cleanup",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.exportVoices",
+        "title": "Back Up Voices to a File",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.importVoices",
+        "title": "Import Voices from a File",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.showLog",
+        "title": "Show Spoken Log",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.speak",
+        "title": "Speak Selection",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.languages",
+        "title": "Languages and Translation",
+        "category": "Claude Code TTS"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeCodeTts.toggle",
+        "key": "ctrl+shift+alt+v",
+        "mac": "ctrl+alt+v"
+      },
+      {
+        "command": "claudeCodeTts.pauseResume",
+        "key": "ctrl+shift+alt+p",
+        "mac": "ctrl+alt+p"
+      },
+      {
+        "command": "claudeCodeTts.skip",
+        "key": "ctrl+shift+alt+n",
+        "mac": "ctrl+alt+n"
+      },
+      {
+        "command": "claudeCodeTts.speak",
+        "key": "ctrl+shift+alt+s",
+        "mac": "ctrl+alt+s"
+      },
+      {
+        "command": "claudeCodeTts.repeatLast",
+        "key": "ctrl+shift+alt+r",
+        "mac": "ctrl+alt+r"
+      },
+      {
+        "command": "claudeCodeTts.rateUp",
+        "key": "ctrl+shift+alt+=",
+        "mac": "ctrl+alt+="
+      },
+      {
+        "command": "claudeCodeTts.rateDown",
+        "key": "ctrl+shift+alt+-",
+        "mac": "ctrl+alt+-"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Claude Code TTS",
+        "order": 1,
+        "properties": {
+          "claudeCodeTts.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Speak Claude Code output aloud.",
+            "order": 0
+          },
+          "claudeCodeTts.engine": {
+            "type": "string",
+            "enum": [
+              "system",
+              "piper",
+              "kokoro",
+              "qwen3",
+              "chatterbox"
+            ],
+            "enumDescriptions": [
+              "Built-in OS text-to-speech (say / espeak / System.Speech). Instant, zero setup.",
+              "Piper neural TTS: light natural voices, fully local. Needs the piper binary and a downloaded voice model.",
+              "Kokoro neural TTS via sherpa-onnx: very natural and fast, fully local. One guided ~360 MB download, no Python.",
+              "Qwen3-TTS (open weights): the most expressive local voices via `uv tool install qwen-tts`, but ~0.8x realtime on Apple Silicon - can lag behind long output.",
+              "Chatterbox Multilingual: clones a voice from a short recording and speaks it in 23 languages, including many the other engines here do not cover. Largest download and the slowest to start."
+            ],
+            "default": "system",
+            "description": "Which text-to-speech engine speaks.",
+            "order": 1
+          },
+          "claudeCodeTts.rate": {
+            "type": "number",
+            "default": 210,
+            "minimum": 70,
+            "maximum": 450,
+            "markdownDescription": "Base speaking rate in words per minute. 210 is a natural reading pace, 280 is brisk, 380 is skimming. Engines that cannot synthesize that fast speak at what they can sustain (the status bar tooltip says so); Kokoro and Piper reach the whole range.",
+            "order": 2
+          },
+          "claudeCodeTts.volume": {
+            "type": "number",
+            "default": 100,
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Speech volume, 0-100.",
+            "order": 3
+          },
+          "claudeCodeTts.speakText": {
+            "type": "boolean",
+            "default": true,
+            "description": "Speak Claude's prose messages.",
+            "order": 4
+          },
+          "claudeCodeTts.speakTools": {
+            "type": "boolean",
+            "default": true,
+            "description": "Announce tool calls, e.g. 'Bash: install dependencies'.",
+            "order": 5
+          },
+          "claudeCodeTts.speakErrors": {
+            "type": "boolean",
+            "default": true,
+            "description": "Announce failed tool calls with a short error summary, e.g. 'Bash error: command not found'.",
+            "order": 6
+          },
+          "claudeCodeTts.listenTo": {
+            "type": "string",
+            "enum": [
+              "everywhere",
+              "workspace"
+            ],
+            "enumDescriptions": [
+              "Every Claude Code session on this machine, including ones started in a terminal outside VSCode. When several windows are open, each speaks its own folders and the one open longest speaks the rest, so you never hear a session twice.",
+              "Only sessions started in a folder this window has open."
+            ],
+            "default": "everywhere",
+            "order": 7,
+            "markdownDescription": "Which Claude Code sessions this window speaks. `everywhere` includes sessions you start with the `claude` command in any terminal, inside VSCode or outside it; `workspace` restricts it to the folders this window has open."
+          }
+        }
+      },
+      {
+        "title": "Claude Code TTS: What Gets Spoken",
+        "order": 2,
+        "properties": {
+          "claudeCodeTts.speakSubagents": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also speak output from subagents Claude launches (can get chatty).",
+            "order": 0
+          },
+          "claudeCodeTts.ignoredTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Tool names never announced, e.g. [\"Read\", \"Grep\", \"Glob\", \"TodoWrite\"]. Errors from these tools are still spoken.",
+            "order": 1
+          },
+          "claudeCodeTts.collapseToolSeconds": {
+            "type": "number",
+            "default": 90,
+            "description": "An unchanged tool announcement ('Editing app.ts' again and again) is silent until the activity changes. After this many seconds of the same activity a single 'Still editing app.ts' reminder is spoken. 0 = never remind.",
+            "order": 2
+          },
+          "claudeCodeTts.interruptOnNew": {
+            "type": "boolean",
+            "default": false,
+            "description": "A new prose message cuts whatever is still being spoken, so you always hear the latest (tool announcements never interrupt).",
+            "order": 3
+          },
+          "claudeCodeTts.onlyWhenUnfocused": {
+            "type": "boolean",
+            "default": false,
+            "description": "Speak only while the VSCode window is not focused: silent while you watch, narrated while you are in another app.",
+            "order": 4
+          },
+          "claudeCodeTts.substitutions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Pronunciation replacements applied before speaking (whole-word, case-insensitive), e.g. {\"vsce\": \"V S C E\", \"nginx\": \"engine x\"}.",
+            "order": 5
+          }
+        }
+      },
+      {
+        "title": "Claude Code TTS: Languages",
+        "order": 3,
+        "properties": {
+          "claudeCodeTts.autoLanguage": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Detect the language of each message and speak it accordingly: Qwen3 is told which language the text is in, chunking follows that script's sentence marks, and a voice mapped in `claudeCodeTts.languageVoices` is used. Detection is local and only acts when it is confident; short lines keep the language of the message around them.",
+            "order": 0
+          },
+          "claudeCodeTts.speakLanguage": {
+            "type": "string",
+            "default": "",
+            "enum": [
+              "",
+              "en",
+              "de",
+              "fr",
+              "es",
+              "it",
+              "pt",
+              "nl",
+              "ru",
+              "ja",
+              "zh",
+              "ko",
+              "he",
+              "ar",
+              "hi",
+              "el",
+              "th"
+            ],
+            "enumDescriptions": [
+              "Speak each message in the language it was written in",
+              "Translate everything into English before speaking",
+              "Translate everything into German before speaking",
+              "Translate everything into French before speaking",
+              "Translate everything into Spanish before speaking",
+              "Translate everything into Italian before speaking",
+              "Translate everything into Portuguese before speaking",
+              "Translate everything into Dutch before speaking",
+              "Translate everything into Russian before speaking",
+              "Translate everything into Japanese before speaking",
+              "Translate everything into Chinese before speaking",
+              "Translate everything into Korean before speaking",
+              "Translate everything into Hebrew before speaking",
+              "Translate everything into Arabic before speaking",
+              "Translate everything into Hindi before speaking",
+              "Translate everything into Greek before speaking",
+              "Translate everything into Thai before speaking"
+            ],
+            "markdownDescription": "Speak everything in this language, translating messages written in another one. Translation runs **on your machine** with Argos Translate (`Claude Code TTS: Set Up Translation` installs it and the language model). Leave empty to speak each message as written. Machine translation of technical prose is imperfect; the output channel shows what was spoken.",
+            "order": 1
+          },
+          "claudeCodeTts.languageVoices": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "engine": {
+                      "type": "string",
+                      "enum": [
+                        "system",
+                        "piper",
+                        "kokoro",
+                        "qwen3",
+                        "chatterbox"
+                      ]
+                    },
+                    "voice": {
+                      "type": "string"
+                    },
+                    "inVoice": {
+                      "type": "string",
+                      "description": "Speak this language through the named voice (\"clone:<slug>\"), so another engine's voice is re-voiced into yours."
+                    }
+                  },
+                  "required": [
+                    "engine",
+                    "voice"
+                  ]
+                }
+              ]
+            },
+            "markdownDescription": "Voice to use per language, with the engine that owns it: `{\"fr\": {\"engine\": \"piper\", \"voice\": \"/path/fr_FR-siwis-medium.onnx\"}}`. Set entries with \"Claude Code TTS: Set Voice for a Language\", which lets you audition first. A voice from another engine is spoken by that engine while everything else keeps yours, so a Piper voice for one language works while Qwen3 speaks the rest. Languages with no entry use the configured voice.",
+            "order": 2
+          },
+          "claudeCodeTts.keepInSourceLanguage": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Words to leave in the language they were written in when translating, instead of translating them. Professionals say many technical terms in English whatever language they are speaking, and machine translation renders them literally instead: \"commit\" comes back as a moral commitment, \"build\" as a building. Empty uses a built-in software glossary (commit, branch, build, deploy, endpoint, query and so on); set your own list to replace it, or `[\" \"]`-style nonsense to effectively disable it. Identifiers, file paths, versions and ALL-CAPS acronyms are always left alone and need no entry.",
+            "order": 3
+          }
+        }
+      },
+      {
+        "title": "Claude Code TTS: Sounds",
+        "order": 4,
+        "properties": {
+          "claudeCodeTts.notifications.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Play a sound when Claude finishes or needs you. Uses Claude Code hooks, so it works for terminal sessions and even with VSCode closed. The hooks are installed the first time this extension runs and removed when it is uninstalled; the 'Toggle Completion Sounds' command turns them off in between.",
+            "order": 0,
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.notifications.sounds": {
+            "type": "object",
+            "default": {
+              "done": "Glass",
+              "permission": "Funk",
+              "question": "Ping",
+              "waiting": "Purr"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "markdownDescription": "Which sound plays for each event, by name from the system sound library. Set an event to an empty string to silence it: a silent event installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one.",
+            "order": 1,
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.notifications.toolFilter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "Bash"
+            ],
+            "description": "Tool names that trigger the tool-run sound. The 'Configure Notification Sounds' command offers a multi-select after you pick the tool sound.",
+            "order": 2,
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.notifications.volume": {
+            "type": "number",
+            "default": 70,
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Notification sound volume, 0-100. Honoured on macOS and Linux, and on Windows when ffplay (ffmpeg) is installed.",
+            "order": 3,
+            "scope": "machine-overridable"
+          }
+        }
+      },
+      {
+        "title": "Claude Code TTS: Voices and Engines",
+        "order": 5,
+        "properties": {
+          "claudeCodeTts.voice": {
+            "type": "string",
+            "default": "",
+            "description": "System-engine voice name. macOS: `say -v ?`; Linux espeak: `espeak --voices`; Windows: installed System.Speech voice name. Empty = default.",
+            "order": 0,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.piper.path": {
+            "type": "string",
+            "default": "piper",
+            "description": "Piper executable: a name on PATH or an absolute path. Install with `pip install piper-tts` (the maintained OHF-Voice/piper1-gpl build).",
+            "order": 1,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine"
+          },
+          "claudeCodeTts.piper.voice": {
+            "type": "string",
+            "default": "",
+            "description": "Absolute path to a Piper .onnx voice model (its .onnx.json must sit next to it). Use the 'Download Piper Voice' command to fetch one.",
+            "order": 2,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine"
+          },
+          "claudeCodeTts.kokoro.voice": {
+            "type": "string",
+            "default": "af_heart",
+            "description": "Kokoro speaker name, e.g. af_heart (flagship), af_bella, am_michael, bf_emma, bm_george. Use 'Select Voice' to audition all of them.",
+            "order": 3,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.qwen3.voice": {
+            "type": "string",
+            "default": "Ryan",
+            "description": "Qwen3-TTS voice: a preset speaker (Ryan, Aiden, Eric, Dylan, Uncle_Fu, Vivian, Serena, Ono_Anna, Sohee) or a cloned profile (clone:<name>). Use 'Select Voice' to audition and 'Clone My Voice' to record your own.",
+            "order": 4,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.qwen3.model": {
+            "type": "string",
+            "enum": [
+              "0.6B",
+              "1.7B"
+            ],
+            "default": "0.6B",
+            "markdownDescription": "Qwen3-TTS model size. **0.6B** (default): streams at ~0.7x realtime on Apple Silicon, first words in ~1s, keeps up with faster speech rates. **1.7B**: the larger model, noticeably closer to a cloned reference and steadier, but measured at ~1.0x realtime idle and slower on a busy machine: it cannot keep up with playback faster than it synthesizes, so the player buffers part of each chunk before starting (a few seconds at rates above ~170 wpm) and chunks are kept shorter. Choose it for quality at a rate near 175 wpm. Models download from Hugging Face on first use (0.6B ~1.4GB, 1.7B ~3.4GB per variant). Changing this restarts the engine.",
+            "order": 5,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.qwen3.style": {
+            "type": "string",
+            "default": "Speak in a calm, natural, steady narration voice, articulating each word clearly, with natural pauses between sentences.",
+            "markdownDescription": "Delivery instruction given to Qwen3 **preset** speakers (they accept a style prompt; cloned and designed voices do not). The default keeps voices like Ryan even and natural instead of theatrical. Clear it to use the model's own default delivery.",
+            "order": 6,
+            "tags": [
+              "advanced"
+            ]
+          },
+          "claudeCodeTts.qwen3.runtime": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "mlx",
+              "torch"
+            ],
+            "enumDescriptions": [
+              "MLX on Apple Silicon when mlx-audio is installed, otherwise PyTorch (qwen-tts).",
+              "Apple MLX via mlx-audio (fastest on Apple Silicon).",
+              "PyTorch via the qwen-tts package (cross-platform)."
+            ],
+            "default": "auto",
+            "description": "Qwen3-TTS inference runtime. Install MLX with `uv tool install mlx-audio`.",
+            "order": 7,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine"
+          },
+          "claudeCodeTts.chatterbox.voice": {
+            "type": "string",
+            "default": "default",
+            "markdownDescription": "Voice for the Chatterbox engine: `clone:<slug>` for one of your cloned or designed voices (the same profiles the Qwen3 engine uses). Chatterbox speaks its 23 languages in that voice. It has no usable built-in speaker on the MLX runtime, so `default` only works on the PyTorch runtime; pick a voice with \"Claude Code TTS: Select Voice\".",
+            "order": 8,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine-overridable"
+          },
+          "claudeCodeTts.chatterbox.runtime": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "mlx",
+              "torch"
+            ],
+            "enumDescriptions": [
+              "MLX on Apple Silicon when mlx-audio is installed, otherwise the PyTorch virtualenv.",
+              "Apple MLX via mlx-audio: about 1.7x faster than PyTorch here, and the newer v3 weights.",
+              "PyTorch in the extension's own virtualenv (cross-platform)."
+            ],
+            "default": "auto",
+            "markdownDescription": "Which runtime speaks Chatterbox. `auto` prefers MLX on Apple Silicon (measured 1.45x realtime, versus 2.4x for PyTorch) and falls back to the PyTorch virtualenv elsewhere.",
+            "order": 9,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine"
+          },
+          "claudeCodeTts.voiceRates": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "number"
+            },
+            "scope": "machine-overridable",
+            "tags": [
+              "advanced"
+            ],
+            "order": 11,
+            "markdownDescription": "Speaking rate per voice, in words per minute, keyed `engine:voice`. Written by **Speak Faster**, **Speak Slower** and **Set Speech Rate**: the pace you choose while listening to a voice belongs to that voice, so switching voices no longer means retuning by hand. A voice with no entry here speaks at `claudeCodeTts.rate`."
+          }
+        }
+      },
+      {
+        "title": "Claude Code TTS: Performance",
+        "order": 6,
+        "properties": {
+          "claudeCodeTts.dynamicRate": {
+            "type": "boolean",
+            "default": true,
+            "description": "Speed up toward maxRate when speech falls behind Claude (proportional to queued backlog).",
+            "order": 0,
+            "tags": [
+              "advanced"
+            ]
+          },
+          "claudeCodeTts.pauseScale": {
+            "type": "number",
+            "default": 1,
+            "minimum": 0,
+            "maximum": 2.5,
+            "markdownDescription": "How long the pauses between sentences are, as a multiple of a natural reading pause (about 0.45s after a full stop, less after a colon or comma, with a little variation so it does not tick like a metronome). `0` runs sentences together, `1.5` reads slowly and deliberately.",
+            "order": 1,
+            "tags": [
+              "advanced"
+            ]
+          },
+          "claudeCodeTts.idleUnloadMinutes": {
+            "type": "number",
+            "default": 45,
+            "minimum": 0,
+            "maximum": 1440,
+            "markdownDescription": "Minutes without speech after which the Qwen3 or Chatterbox model is unloaded from memory (0 keeps it resident). A loaded model holds 1.5-3 GB; on a 16 GB machine that was measured to push the system into swap during quiet stretches. Reloading is not free: measured end to end for Chatterbox, the first sentence after an unload arrives **27 s** later (16 s to load the weights, 11 s to speak). Lower it to reclaim memory sooner, raise it (or set 0) if you would rather never wait.",
+            "order": 2,
+            "tags": [
+              "advanced"
+            ],
+            "scope": "machine-overridable"
+          }
+        }
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "claudeCodeTts.languageVoice",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.rateUp",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.rateDown",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.speakSelection",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.speakClipboard",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.resetSettings",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.removeEverything",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.downloadVoice",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.setupKokoro",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.setupQwen3",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.setupChatterbox",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.setupTranslation",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.toggleNotifications",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.configureSounds",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.designVoice",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.cloneVoice",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.cloneVoiceFromFile",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.storage",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.exportVoices",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.importVoices",
+          "when": "false"
+        },
+        {
+          "command": "claudeCodeTts.showLog",
+          "when": "false"
+        }
+      ]
+    },
+    "walkthroughs": [
+      {
+        "id": "claudeCodeTts.gettingStarted",
+        "title": "Get started with Claude Code TTS",
+        "description": "Hear Claude Code's replies read aloud, in a voice you choose, entirely on your machine.",
+        "steps": [
+          {
+            "id": "hear",
+            "title": "Hear Claude speak",
+            "description": "Claude Code TTS is already listening. Speak any text now with the Speak Selection command.\n[Speak a selection](command:claudeCodeTts.speak)",
+            "media": {
+              "markdown": "docs/walkthrough/hear.md"
+            }
+          },
+          {
+            "id": "voice",
+            "title": "Get a voice worth listening to",
+            "description": "The voice this computer came with sounds like one. One guided install replaces it, and it can speak as a voice of your own.\n[Set up the best voice](command:claudeCodeTts.setupBestVoice)",
+            "media": {
+              "markdown": "docs/walkthrough/voice.md"
+            }
+          },
+          {
+            "id": "own",
+            "title": "Make it your own voice",
+            "description": "Record ten seconds, use a file you have, or design a voice from a description.\n[Open My Voices](command:claudeCodeTts.manageVoices)",
+            "media": {
+              "markdown": "docs/walkthrough/own.md"
+            }
+          },
+          {
+            "id": "languages",
+            "title": "Listen in your own language",
+            "description": "Translate everything locally into one language, or give one language its own voice.\n[Languages and translation](command:claudeCodeTts.languages)",
+            "media": {
+              "markdown": "docs/walkthrough/languages.md"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "compile": "npm run clean && tsc -p ./",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.js\" \"*.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.js\" \"*.json\"",
+    "lint": "eslint src test --no-warn-ignored",
+    "lint:fix": "eslint src test --fix --no-warn-ignored",
+    "package": "node scripts/marketplace-readme.js && vsce package --readme-path README.marketplace.md",
+    "test": "node --test --test-concurrency=1 --test-timeout=120000 \"test/unit/*.test.js\" \"test/integration/*.test.js\" && node test/activate-smoke.js",
+    "test:unit": "node --test --test-concurrency=1 --test-timeout=90000 \"test/unit/*.test.js\"",
+    "verify": "npm run format:check && npm run lint && npm run compile && npm test",
+    "vscode:prepublish": "npm run format:check && npm run lint && npm run compile && npm test",
+    "vscode:uninstall": "node ./out/setup/uninstallHook.js",
+    "watch": "tsc -w -p ./"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Speech works in an untrusted workspace. Settings that name a program to run, or a voice model to load, are ignored there and the ones from your user settings are used instead.",
+      "restrictedConfigurations": [
+        "claudeCodeTts.piper.path",
+        "claudeCodeTts.piper.voice",
+        "claudeCodeTts.kokoro.voice",
+        "claudeCodeTts.qwen3.voice",
+        "claudeCodeTts.chatterbox.voice",
+        "claudeCodeTts.languageVoices",
+        "claudeCodeTts.substitutions",
+        "claudeCodeTts.qwen3.style"
+      ]
+    }
+  },
+  "homepage": "https://github.com/giladreich/claude-code-tts#readme",
+  "galleryBanner": {
+    "color": "#D97757",
+    "theme": "dark"
+  },
+  "qna": "https://github.com/giladreich/claude-code-tts/issues"
+}

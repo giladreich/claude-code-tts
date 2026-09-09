@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest something the extension should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The situation, not the solution. What is awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Does it fit the project's constraints
+      description: |
+        Claude Code TTS runs entirely on the user's machine. Features that require sending text or audio to a service will not be accepted; see docs/PRIVACY.md.
+      options:
+        - label: This can work without sending anything off the machine
+        - label: This works (or degrades cleanly) on macOS, Linux and Windows

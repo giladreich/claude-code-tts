@@ -1,0 +1,35 @@
+# What ships in the .vsix: the compiled extension, the assets it runs, the
+# icon, and the documents a user might open. Everything else is source,
+# tooling, or a file only a contributor needs.
+src/**
+test/**
+tsconfig.json
+node_modules/**
+.vscode/**
+.github/**
+.claude/**
+scripts/**
+.gitignore
+.gitattributes
+**/*.map
+*.vsix
+assets/icon.svg
+__pycache__/
+**/__pycache__/**
+*.pyc
+
+# The Marketplace gets README.marketplace.md instead, written by
+# scripts/marketplace-readme.js and named with --readme-path: both would
+# otherwise collide as readme.md inside the .vsix.
+README.md
+
+# Contributor documents.
+CLAUDE.md
+docs/CONTRIBUTING.md
+docs/CODE_OF_CONDUCT.md
+docs/PUBLISHING.md
+docs/SECURITY.md
+docs/SKILLS.md
+eslint.config.mjs
+.prettierrc.json
+.prettierignore

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>A speaker built from a chevron: the current icon, with code in it</title>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#D97757"/>
+  <path d="M46 104h34l44-40a8 8 0 0 1 13 6v116a8 8 0 0 1-13 6l-44-40H46a10 10 0 0 1-10-10v-28a10 10 0 0 1 10-10z" fill="#fff"/>
+  <g fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round">
+    <path d="M170 96a44 44 0 0 1 0 64"/>
+    <path d="M200 72a84 84 0 0 1 0 112"/>
+  </g>
+</svg>

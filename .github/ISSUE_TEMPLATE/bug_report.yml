@@ -1,0 +1,79 @@
+name: Bug report
+description: Something does not work (no speech, wrong voice, crash, stutter)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: run **Claude Code TTS: Check Setup** from the command palette. It says what works on your machine and gives the command that fixes what does not, which resolves most reports on the spot.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+      placeholder: Speech stops after the first sentence when I switch voices.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Speech engine
+      options:
+        - System (say / espeak-ng / System.Speech)
+        - Kokoro
+        - Qwen3 (preset voice)
+        - Qwen3 (cloned or designed voice)
+        - Piper
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      description: Extensions view, or the first line of the changelog you installed
+      placeholder: 1.20.0
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Output of "Check Setup"
+      description: Command palette > Claude Code TTS: Check Setup. List the entries that are not ticked.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Status bar menu > "Open diagnostics folder" holds `player.log` and the daemon logs; "Show Spoken Log" shows what the extension received. Paste the relevant lines (they contain no transcript text).
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reloaded the window after installing (each window keeps the version it started with)
+          required: true
+        - label: I checked that the status bar item is not muted
+          required: true

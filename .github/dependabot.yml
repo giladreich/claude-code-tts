@@ -1,0 +1,33 @@
+# Updates arrive as two pull requests a month, not ten: one for the toolchain
+# and one for the actions. Two dependencies are pinned on purpose and are not
+# anybody's to bump automatically.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      toolchain:
+        patterns: ["*"]
+    ignore:
+      # @types/vscode must stay at engines.vscode: it is what stops the code
+      # calling an API that the oldest supported editor does not have. Raising
+      # the floor is a decision about who can install the extension, so both
+      # numbers move together, by hand.
+      - dependency-name: "@types/vscode"
+      # @types/node must not get ahead of the Node that editor ships either.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the native port; typescript-eslint 8 asks for
+      # "<6.1.0", so the major lands when the linter can read it.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

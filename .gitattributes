@@ -1,0 +1,5 @@
+# Keep line endings stable across platforms: the tests parse fenced blocks in
+# the docs, and the Swift/Python helpers are read by tools that dislike CRLF.
+* text=auto eol=lf
+*.png binary
+*.vsix binary

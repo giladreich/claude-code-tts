@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch supersedes the run before it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  style:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Prettier decides layout and ESLint decides what may be written; both
+      # run first because they are seconds, need nothing installed, and a
+      # review should never be about either.
+      - run: npm run format:check
+      - run: npm run lint
+
+  unit:
+    name: Compile and unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+      - run: npm ci
+      - run: npm run compile
+      # Unit tests cover text handling, the speech queue, transcript tailing,
+      # hooks, the notification script and both Python daemons (driven by
+      # fake model modules, so no weights are needed).
+      - run: npm run test:unit
+      - run: node test/activate-smoke.js
+
+  integration:
+    name: Player and pipeline tests (macOS)
+    runs-on: macos-latest
+    # Hosted macOS runners may lack an audio output device; until that is
+    # confirmed working, a failure here does not block the pipeline.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+      # Compiles the Swift player, recorder-side helpers and the test video
+      # generator, then plays silently (volume 0) through CoreAudio.
+      - run: node --test --test-concurrency=1 --test-timeout=180000 "test/integration/*.test.js"
+
+  windows:
+    name: Compile and unit tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+      - run: npm ci
+      - run: npm run compile
+      # The Windows paths (drive-letter scoping, hook matching, venv layout,
+      # sound library, tar) have their own behaviour and are only proven here.
+      - run: npm run test:unit
+      - run: node test/activate-smoke.js
+
+  package:
+    name: Package .vsix
+    needs: [style, unit, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+      # vsce runs vscode:prepublish (the full suite); on Linux the macOS-only
+      # integration tests skip themselves.
+      # Through npm, so the Marketplace README is written first.
+      - run: npm run package -- --out claude-code-tts.vsix
+      - uses: actions/upload-artifact@v7
+        with:
+          name: claude-code-tts-vsix
+          path: claude-code-tts.vsix

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup help (installing an engine, Qwen3, voice cloning)
+    url: https://github.com/giladreich/claude-code-tts/blob/main/docs/GUIDE.md
+    about: Step-by-step setup for macOS, Linux and Windows, with the exact commands.
+  - name: Claude does not narrate between tool calls
+    url: https://github.com/giladreich/claude-code-tts/blob/main/README.md#what-gets-spoken-and-a-known-claude-code-limitation
+    about: A Claude Code limitation, not an extension bug. Read this first.
+  - name: Privacy and what touches the network
+    url: https://github.com/giladreich/claude-code-tts/blob/main/docs/PRIVACY.md
+    about: Every network call in the extension, and how to verify it offline.

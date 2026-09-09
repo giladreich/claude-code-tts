@@ -1,0 +1,135 @@
+name: Release
+
+# Tag a commit "1.0.0" (matching package.json) to build the .vsix, attach it
+# to a GitHub release, and publish it.
+#
+# Marketplace authentication is Microsoft Entra ID: set the AZURE_CLIENT_ID
+# and AZURE_TENANT_ID repository variables, add a federated credential on that
+# identity for this repository's "release" environment, and make the identity
+# a member of the publisher. GitHub mints a short-lived OIDC token, and
+# nothing is stored. Without those variables the release is still built and
+# attached to GitHub, just not published. docs/PUBLISHING.md has the steps.
+#
+# Run this workflow by hand ("Run workflow") to check the credential without
+# releasing anything: it signs in, prints the identity's Azure DevOps id (the
+# value the publisher's member list wants), asks the Marketplace whether the
+# identity may publish, and stops.
+#
+# Open VSX is separate: OVSX_PAT, from open-vsx.org.
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+", "[0-9]+.[0-9]+.[0-9]+-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write # for the Entra ID federated credential
+
+jobs:
+  check:
+    name: Check the publishing credential
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: release # the federated credential is scoped to this name
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Say which step is missing, rather than failing in Azure
+        run: |
+          if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ]; then
+            echo "Set the AZURE_CLIENT_ID and AZURE_TENANT_ID repository variables (docs/PUBLISHING.md, step 3)."
+            exit 1
+          fi
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Print this identity's Azure DevOps id
+        run: |
+          # Publishing rights belong to an Azure DevOps profile, and an identity
+          # that has never called Azure DevOps has none: this call creates it and
+          # returns the id to paste into the publisher's members. 499b84ac- is
+          # Azure DevOps's own application ID in Entra ID, the same everywhere.
+          ID=$(az rest -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv)
+          echo "Azure DevOps id of this identity: $ID"
+          {
+            echo "### Azure DevOps id of this identity"
+            echo
+            echo '`'"$ID"'`'
+            echo
+            echo "Add it to the publisher's members as Contributor (docs/PUBLISHING.md, step 6)."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Ask the Marketplace whether this identity may publish
+        run: npx vsce verify-pat "$(node -p "require('./package.json').publisher")" --azure-credential
+
+  release:
+    name: Build, release and publish
+    if: github.event_name == 'push'
+    runs-on: macos-latest # runs the complete suite, integration tests included
+    environment: release # the federated credential is scoped to this name
+    env:
+      # Step-level "if" cannot read the secrets context; expose them as env.
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+      - run: npm ci
+      - name: Check that the tag matches package.json
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then echo "tag $TAG but package.json is $PKG"; exit 1; fi
+      - run: npm run compile
+      - run: npm run package -- --out "claude-code-tts-${GITHUB_REF_NAME}.vsix"
+      - name: Extract this version's changelog section
+        run: |
+          node -e '
+            const fs = require("fs");
+            const v = process.env.GITHUB_REF_NAME;
+            const md = fs.readFileSync("CHANGELOG.md", "utf8");
+            // Headings are "## [1.2.3]" or "## [1.2.3] - 2026-01-01" or "## 1.2.3".
+            const heading = new RegExp("^\\[?" + v.replace(/\./g, "\\.") + "\\]?(\\s|$)");
+            const m = md.split(/^## /m).find((s) => heading.test(s));
+            fs.writeFileSync("release-notes.md", m ? m.slice(m.indexOf("\n") + 1).trim() : "See CHANGELOG.md.");
+          '
+      - name: GitHub release with the .vsix attached
+        uses: softprops/action-gh-release@v3
+        with:
+          files: claude-code-tts-*.vsix
+          body_path: release-notes.md
+      # --- Marketplace, with the federated credential
+      - name: Sign in to Azure with the federated credential
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Publish to the VS Code Marketplace
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
+        run: |
+          # Checked first, so a permission problem says so instead of failing
+          # part way through an upload.
+          npx vsce verify-pat "$(node -p "require('./package.json').publisher")" --azure-credential
+          npx vsce publish --packagePath claude-code-tts-*.vsix --azure-credential
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx ovsx publish claude-code-tts-*.vsix -p "$OVSX_PAT"

@@ -1,0 +1,53 @@
+name: Voice or audio quality
+description: It speaks, but it sounds wrong (stutter, robotic, wrong words, clone does not match)
+labels: ["audio-quality"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Audio problems usually come from one of four places: the engine, the playback path, the chunking, or (for clones) the reference recording. The questions below identify which.
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What does it sound like
+      options:
+        - Stutters or gaps between parts of a sentence
+        - Flat, no pauses between sentences
+        - Wrong pronunciation of specific words
+        - Speed changes on its own, or ignores my rate setting
+        - A cloned voice does not sound like the reference
+        - A cloned voice says words that are not in the text
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: text
+    attributes:
+      label: The text being spoken
+      description: Paste the sentence, if it is reproducible with specific text.
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine and model
+      options:
+        - Kokoro
+        - Qwen3 0.6B
+        - Qwen3 1.7B
+        - Piper
+        - System voice
+    validations:
+      required: true
+  - type: input
+    id: rate
+    attributes:
+      label: Rate setting (claudeCodeTts.rate) and platform
+      placeholder: 210 wpm, macOS Apple Silicon
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: player.log excerpt
+      description: |
+        "Open diagnostics folder" > player.log. Lines containing `underrun`, `WATCHDOG` or `prebuffering` explain most audio problems.
+      render: text
