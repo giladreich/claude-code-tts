@@ -22,49 +22,13 @@ Everything runs on your machine. No cloud speech, no telemetry, no accounts, no 
 
 Two things happen when Claude Code finishes a thought, and only one of them is this extension.
 
-```mermaid
-flowchart LR
-    subgraph CC["Claude Code - runs with or without VSCode open"]
-        T["Transcript file<br/>every reply, as it is written"]
-        H["Hook events<br/>finished, needs you, asked a question"]
-    end
-    subgraph EXT["Claude Code TTS - the VSCode extension"]
-        R["Reads the new lines<br/>prose and tool calls, never code"]
-        S["Speaks them<br/>your voice, speed and language"]
-        W["Writes the hook entries<br/>and picks a sound for each event"]
-    end
-    N["notify script<br/>run by Claude Code, not by VSCode"]
-    OUT(("Your speakers"))
-    T --> R --> S --> OUT
-    H --> N --> OUT
-    W -. "sets up, then stays out of the way" .-> N
-```
+![Claude Code writes a transcript file and fires hook events. The extension reads the new lines, prose and tool calls but never code, and speaks them in your voice, speed and language. It also writes the hook entries once and picks a sound per event, after which Claude Code runs the notify script itself. Both reach your speakers.](assets/diagrams/how-it-works.png)
 
 The alerts are Claude Code's, not the extension's: the extension writes the hook entries into `~/.claude/settings.json` once, and after that a small script plays the sound, so alerts still work with VSCode closed. Speech is the extension's own job: it tails the transcript file the agent has already written, so it adds no traffic and never talks to Claude Code.
 
 Nothing is downloaded until you ask for something that needs it, and each engine is a local model that runs on your machine.
 
-```mermaid
-flowchart LR
-    A["Install<br/>0 MB<br/>speaks with the system voice"]
-    B["Want a natural voice"]
-    C["Want your own voice<br/>ten seconds read aloud, or described in words"]
-    D["Want everything in one language"]
-    K["Kokoro<br/>360 MB, no Python"]
-    Q["Qwen3-TTS<br/>2.3 GB, speaks ten languages"]
-    X["Chatterbox<br/>3 GB, speaks 23"]
-    WH["Whisper<br/>485 MB, checks what you read"]
-    AR["Argos Translate<br/>100 MB per language pair"]
-    A --> B
-    A --> C
-    A --> D
-    B --> K
-    B --> Q
-    C --> Q
-    C --> WH
-    C -. "a language Qwen3 cannot say" .-> X
-    D --> AR
-```
+![Installing downloads nothing and speaks with the system voice. Wanting a natural voice adds Kokoro at 360 MB or Qwen3-TTS at 2.3 GB. Wanting your own voice adds Qwen3-TTS, Whisper at 485 MB to check what you read, and Chatterbox at 3 GB for a language Qwen3 cannot say. Wanting everything in one language adds Argos Translate at 100 MB per language pair.](assets/diagrams/what-downloads.png)
 
 A voice you record or design is one file both cloning engines can speak, so the language you listen in decides the engine, not the voice. Six URLs exist in the whole source tree, four downloads and two documentation links you click yourself, listed in [PRIVACY.md](docs/PRIVACY.md) with the command that proves it.
 

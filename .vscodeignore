@@ -9,6 +9,9 @@ node_modules/**
 .github/**
 .claude/**
 scripts/**
+# The README's images are served from the repository, so the package carries
+# neither them nor the mermaid they are rendered from.
+assets/diagrams/**
 .gitignore
 .gitattributes
 **/*.map

@@ -1,0 +1,15 @@
+flowchart LR
+    subgraph CC["Claude Code - runs with or without VSCode open"]
+        T["Transcript file<br/>every reply, as it is written"]
+        H["Hook events<br/>finished, needs you, asked a question"]
+    end
+    subgraph EXT["Claude Code TTS - the VSCode extension"]
+        R["Reads the new lines<br/>prose and tool calls, never code"]
+        S["Speaks them<br/>your voice, speed and language"]
+        W["Writes the hook entries<br/>and picks a sound for each event"]
+    end
+    N["notify script<br/>run by Claude Code, not by VSCode"]
+    OUT(("Your speakers"))
+    T --> R --> S --> OUT
+    H --> N --> OUT
+    W -. "sets up, then stays out of the way" .-> N

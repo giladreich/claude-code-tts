@@ -1,0 +1,19 @@
+flowchart LR
+    A["Install<br/>0 MB<br/>speaks with the system voice"]
+    B["Want a natural voice"]
+    C["Want your own voice<br/>ten seconds read aloud, or described in words"]
+    D["Want everything in one language"]
+    K["Kokoro<br/>360 MB, no Python"]
+    Q["Qwen3-TTS<br/>2.3 GB, speaks ten languages"]
+    X["Chatterbox<br/>3 GB, speaks 23"]
+    WH["Whisper<br/>485 MB, checks what you read"]
+    AR["Argos Translate<br/>100 MB per language pair"]
+    A --> B
+    A --> C
+    A --> D
+    B --> K
+    B --> Q
+    C --> Q
+    C --> WH
+    C -. "a language Qwen3 cannot say" .-> X
+    D --> AR

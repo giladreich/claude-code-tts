@@ -1,0 +1,5 @@
+{
+  "theme": "neutral",
+  "themeVariables": { "fontFamily": "-apple-system, Segoe UI, Helvetica, Arial, sans-serif", "fontSize": "16px" },
+  "flowchart": { "htmlLabels": true, "curve": "basis", "nodeSpacing": 34, "rankSpacing": 55, "padding": 6, "diagramPadding": 8 }
+}

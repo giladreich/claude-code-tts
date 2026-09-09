@@ -74,6 +74,23 @@ State the numbers in the PR. "Sounds better" is not reviewable; "first audio 0.8
 
 Both are enforced by tests. `test/unit/docs.test.js` fails if a setting is missing from the settings table in [REFERENCE.md](REFERENCE.md#settings) or its documented default no longer matches `package.json`, and if a command has no row in the commands table there under its current title. `test/unit/contract.test.js` fails if a new setting is missing from `SETTING_KEYS` in `src/core/config.ts` (reset-to-defaults walks that list), if a `get()` fallback differs from the schema default, or if a command hidden from the palette is offered nowhere else (a menu row, another flow, or `LEGACY_COMMANDS` in `src/core/commandCatalogue.ts`). Renaming or removing a setting needs an entry in `src/core/settingsMigration.ts`, or users silently lose the value. Add all of it in the same commit.
 
+## The README diagrams
+
+The two pictures in the README are rendered from the mermaid next to them, and
+the mermaid is the source: edit `assets/diagrams/*.mmd`, then
+
+```sh
+npx @mermaid-js/mermaid-cli -i assets/diagrams/how-it-works.mmd \
+  -o assets/diagrams/how-it-works.png -c assets/diagrams/mermaid.config.json -b white --scale 2
+```
+
+Images rather than a ```mermaid block because the Marketplace has no mermaid
+renderer: it printed both diagrams as walls of `flowchart LR` text on the
+store page. Do not pass a width; the natural layout is compact, and forcing
+one made the type too small to read once the page scaled the picture down.
+PNG rather than SVG, which the Marketplace refuses. Update the alt text with
+the picture: it is what a screen reader and a failed image both fall back to.
+
 ## Releasing
 
 1. Update `CHANGELOG.md` (top entry, user-facing) and the version in `package.json`.

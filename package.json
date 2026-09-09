@@ -2,7 +2,7 @@
   "name": "claude-code-tts",
   "displayName": "Claude Code TTS",
   "description": "Speaks Claude Code's prose output and tool actions aloud (text-to-speech). Reads text, not code.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "giladreich",
   "license": "MIT",
   "icon": "assets/icon.png",
@@ -18,22 +18,35 @@
     "claude-code",
     "text-to-speech",
     "tts",
-    "voice",
-    "accessibility",
+    "read-aloud",
     "speech",
-    "cli",
-    "terminal",
+    "voice",
     "narration",
+    "narrator",
+    "speak",
+    "listen",
+    "audio",
+    "accessibility",
+    "hands-free",
+    "voice-cloning",
+    "kokoro",
+    "piper",
+    "qwen3",
+    "chatterbox",
+    "neural-tts",
     "local",
     "offline",
-    "voice-cloning"
+    "privacy",
+    "cli",
+    "terminal",
+    "agent"
   ],
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "AI",
-    "Other"
+    "Chat"
   ],
   "activationEvents": [
     "onStartupFinished"
