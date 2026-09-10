@@ -180,3 +180,48 @@ test("widening the scope does not replay what was out of scope before", async ()
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a scope that widens while the position is being moved does not swallow the next line", async () => {
+  // Out of scope, the position is moved to the end of the file by an async
+  // stat. On a loaded machine that callback lands late: by then the user may
+  // have switched to "every session" and the session written its next line,
+  // and moving the position now steps over it, so it is never spoken. The CI
+  // saw this as the test above timing out; here the interleaving is forced
+  // rather than waited for.
+  const root = tmpDir("cv-tail-widen-");
+  const other = path.join(root, "-other-project");
+  fs.mkdirSync(other, { recursive: true });
+  const f = path.join(other, "s.jsonl");
+  fs.writeFileSync(f, '{"old":1}\n');
+  const lines = [];
+  let wide = false;
+  let armed = true;
+  const t = new TranscriptTailer(
+    (l) => lines.push(l),
+    (e) => {
+      throw new Error(e);
+    },
+    () => {
+      // This call is the tailer deciding the file is out of scope. Everything
+      // that happens next models the microsecond after that decision: the
+      // user widens the scope and the session writes a line, both before the
+      // stat behind the decision has come back.
+      if (armed) {
+        armed = false;
+        wide = true;
+        fs.appendFileSync(f, '{"after":1}\n');
+        return false;
+      }
+      return wide;
+    },
+    root
+  );
+  t.start();
+  try {
+    await until(() => lines.length > 0, 3000);
+    assert.deepEqual(lines, ['{"after":1}'], "the line written as the scope widened is still spoken");
+  } finally {
+    t.dispose();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

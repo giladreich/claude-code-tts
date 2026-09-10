@@ -174,7 +174,14 @@ export class TranscriptTailer {
       // session was out of scope is history, not something to speak if the
       // scope widens a minute later.
       fs.stat(file, (err, stat) => {
-        if (!err) {
+        // The scope can widen while this stat is in flight, and the session
+        // can write its next line in the same instant. Advancing the position
+        // then steps over that line and nothing ever speaks it, so the widened
+        // scope is checked again here, against the size that was just read:
+        // leave the position where it was and read the file properly instead.
+        if (this.inScope(this.projectDirOf(file))) {
+          this.dirty.add(file);
+        } else if (!err) {
           const known = this.files.get(file);
           if (known) {
             known.offset = stat.size;

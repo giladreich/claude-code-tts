@@ -8,6 +8,7 @@ changed for you. The format follows
 ## [1.0.1]
 
 - The store page shows the two diagrams as pictures. The Marketplace has no mermaid renderer, so both arrived as a wall of `flowchart LR` text where a diagram was meant to be.
+- Switching to "speak every session" no longer loses the first line written at that moment. The position of a file being skipped was moved forward by a check that could finish after the switch, and whatever arrived in between was stepped over.
 - Easier to find: the extension is listed under AI and Chat rather than AI and Other, and the search terms it answers to now include the names of the engines it installs.
 
 ## [1.0.0]
