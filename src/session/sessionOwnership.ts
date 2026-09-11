@@ -147,6 +147,11 @@ export class SessionOwnership {
     return this.live().length;
   }
 
+  /** The ids of the windows that are open right now, this one included. */
+  liveIds(): string[] {
+    return this.live().map((r) => r.id);
+  }
+
   private recordPath(id: string): string {
     return path.join(this.dir, `${id}.json`);
   }

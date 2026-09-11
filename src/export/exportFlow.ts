@@ -40,10 +40,12 @@ import {
   ExportQuality,
   findEncoders,
   firstWords,
+  formatForPath,
   FORMATS,
   messagesOf,
   missingFor,
   parseRange,
+  PAUSE_CAP,
   PauseStyle,
   PlayedMessage,
   QUALITY_LABEL,
@@ -87,6 +89,12 @@ function rememberedOptions(enc: Encoders): Options {
   if (!(opts.quality in QUALITY_LABEL)) {
     opts.quality = DEFAULTS.quality;
   }
+  if (opts.speed !== "asPlayed" && opts.speed !== "natural") {
+    opts.speed = DEFAULTS.speed;
+  }
+  if (!(opts.pauses in PAUSE_CAP)) {
+    opts.pauses = DEFAULTS.pauses;
+  }
   if (missingFor(opts.format, enc)) {
     // The best that works without installing anything: AAC on macOS, else WAV.
     opts.format = missingFor("m4a", enc) ? "wav" : "m4a";
@@ -110,12 +118,18 @@ export async function exportAudioFlow(back = false): Promise<MenuOutcome> {
   }
   if (buffer.pending > 0) {
     // The engine that spoke last is still writing its audio (system voices
-    // render it after speaking); a moment, rather than a list missing its
-    // last sentence.
+    // render it after speaking): a moment, rather than a list missing its
+    // last sentence. A moment only; a render that hangs is not waited for.
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: "Claude Code TTS: finishing the last sentence..." },
-      () => buffer.ready()
+      () => Promise.race([buffer.ready(), new Promise<void>((r) => setTimeout(r, 10_000))])
     );
+    if (buffer.pending > 0) {
+      vscode.window.setStatusBarMessage(
+        `Claude Code TTS: ${sentences(buffer.pending)} still being prepared and not in this export yet`,
+        8000
+      );
+    }
   }
   const entries = buffer.list();
   if (entries.length === 0) {
@@ -250,7 +264,7 @@ async function optionsSheet(
     const why: Record<ExportQuality, string> = {
       small: "The smallest file that is still clear speech",
       good: "Clear speech; the usual choice",
-      best: "Nothing to hear that is not in the original",
+      best: "Indistinguishable from the original",
     };
     const rows = (Object.keys(QUALITY_LABEL) as ExportQuality[]).map((q) => ({
       label: `${q === opts.quality ? "$(check) " : ""}${QUALITY_LABEL[q]}`,
@@ -302,7 +316,7 @@ async function optionsSheet(
     const segs = timeline(scope, speedInUse(), opts.pauses);
     const rows: SentenceRow[] = segs.map((s) => ({
       label: firstWords(s.entry.text, 80),
-      description: `${clock(s.t0)}, ${clock(s.seconds)}`,
+      description: `at ${clock(s.t0)}, ${Math.max(1, Math.round(s.seconds))} s`,
       picked: selected.includes(s.entry),
       entry: s.entry,
     }));
@@ -459,15 +473,18 @@ async function doExport(
   const name = `claude-code-tts-${stamp.getFullYear()}-${two(stamp.getMonth() + 1)}-${two(stamp.getDate())}-${two(stamp.getHours())}${two(stamp.getMinutes())}.${format.ext}`;
   const downloads = path.join(os.homedir(), "Downloads");
   const dir = runtime.remembered<string>(DIR_KEY) ?? (fs.existsSync(downloads) ? downloads : os.homedir());
-  const uri = await vscode.window.showSaveDialog({
+  const picked = await vscode.window.showSaveDialog({
     defaultUri: vscode.Uri.file(path.join(dir, name)),
     filters: { [format.label]: [format.ext] },
     saveLabel: "Export",
     title: "Export spoken audio",
   });
-  if (!uri) {
+  if (!picked) {
     return false;
   }
+  // A different extension typed into the save box is a choice too.
+  const target = formatForPath(picked.fsPath, opts.format, encoders);
+  const uri = vscode.Uri.file(target.path);
   void runtime.remember(DIR_KEY, path.dirname(uri.fsPath));
   void runtime.remember(OPTIONS_KEY, opts);
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-code-tts-export-"));
@@ -482,12 +499,11 @@ async function doExport(
         return exportAudio({
           segments,
           range,
-          format: opts.format,
+          format: target.format,
           quality: opts.quality,
           encoders,
           out: uri.fsPath,
           workDir,
-          title: firstWords(segments[0]?.entry.text ?? "", 60),
           signal: controller.signal,
           onProgress: (fraction) => {
             progress.report({ increment: (fraction - shown) * 100 });
@@ -512,7 +528,6 @@ async function doExport(
     return true;
   } catch (e) {
     const message = (e as Error).message;
-    fs.rmSync(uri.fsPath, { force: true });
     if (message !== "cancelled") {
       vscode.window.showErrorMessage(`Claude Code TTS: export failed: ${message}`);
     }

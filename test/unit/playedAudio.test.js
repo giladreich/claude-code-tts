@@ -27,13 +27,13 @@ test("what an engine played is kept as one file per utterance, and the parts are
   const buffer = new PlayedAudio(dir, () => 600);
   buffer.load();
   const parts = [writeWav(path.join(tmpDir(), "a.p0.wav"), 0.4), writeWav(path.join(tmpDir(), "a.p1.wav"), 0.6)];
-  assert.equal(buffer.retain(utterance({ parts, group: 3, tempo: 1.2 })), true, "the files are taken");
+  assert.equal(buffer.retain(utterance({ parts, group: "m3", tempo: 1.2 })), true, "the files are taken");
   await buffer.ready();
   const [entry] = buffer.list();
   assert.ok(entry.file && fs.existsSync(entry.file), "one file in the buffer directory");
   assert.ok(Math.abs(entry.seconds - 1.0) < 0.01, `the parts joined: ${entry.seconds}s`);
   assert.equal(entry.sampleRate, 24000);
-  assert.equal(entry.group, 3);
+  assert.equal(entry.group, "m3");
   assert.equal(entry.tempo, 1.2);
   assert.deepEqual(
     parts.map((p) => fs.existsSync(p)),
@@ -44,7 +44,7 @@ test("what an engine played is kept as one file per utterance, and the parts are
   assert.equal(info.channels, 1);
   assert.equal(info.bitsPerSample, 16);
   // A new window reads it back.
-  await until(() => fs.existsSync(path.join(dir, "index.json")), 2000);
+  await until(() => fs.existsSync(path.join(dir, `index-${buffer.token}.json`)), 2000);
   const again = new PlayedAudio(dir, () => 600);
   again.load();
   assert.equal(again.list().length, 1);
@@ -163,7 +163,7 @@ test(
         new Promise((resolve, reject) =>
           backend.speak({ wpm: 175, voice: "v", volume: 0, ...req }, resolve, (m) => reject(new Error(m)))
         );
-      await speak({ text: "said", group: 4 });
+      await speak({ text: "said", group: "m4" });
       await speak({ text: "audition", preview: true });
       take = false;
       await speak({ text: "unwanted" });
@@ -172,7 +172,7 @@ test(
         ["said", "unwanted"],
         "the audition was never offered"
       );
-      assert.equal(taken[0].group, 4);
+      assert.equal(taken[0].group, "m4");
       assert.equal(taken[0].tempo, 1);
       assert.equal(taken[0].engine, "fake");
       assert.ok(taken[0].endedAt >= taken[0].startedAt);
@@ -186,3 +186,132 @@ test(
     }
   }
 );
+
+test("windows sharing the directory see each other's audio, and a closed window's audio is adopted", async () => {
+  const dir = path.join(tmpDir(), "played");
+  const live = new Set(["a", "b"]);
+  const isLive = (t) => live.has(t);
+  const a = new PlayedAudio(dir, () => 600, { token: "a", isLive });
+  const b = new PlayedAudio(dir, () => 600, { token: "b", isLive });
+  a.load();
+  b.load();
+  const say = (buffer, text, at) =>
+    buffer.retain(
+      utterance({ text, parts: [writeWav(path.join(tmpDir(), `${text}.wav`), 0.2)], startedAt: at, endedAt: at + 200 })
+    );
+  say(a, "a1", 1000);
+  say(b, "b1", 2000);
+  say(a, "a2", 3000);
+  await Promise.all([a.ready(), b.ready()]);
+  await until(
+    () => fs.existsSync(path.join(dir, "index-a.json")) && fs.existsSync(path.join(dir, "index-b.json")),
+    2000
+  );
+  await new Promise((r) => setTimeout(r, 300)); // other windows' indexes are re-read every quarter second
+  const names = (buffer) => buffer.list().map((e) => e.text);
+  assert.deepEqual(names(a), ["a1", "b1", "a2"], "in the order they played, whichever window played them");
+  assert.deepEqual(names(b), ["a1", "b1", "a2"]);
+  assert.ok(
+    a.list().every((e) => /\/p(a|b)-\d+\.wav$/.test(e.file)),
+    "files are named after the window that wrote them"
+  );
+  // Window b closes: the next window to look adopts what it kept.
+  live.delete("b");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(names(a), ["a1", "b1", "a2"]);
+  assert.ok(!fs.existsSync(path.join(dir, "index-b.json")), "b's index is gone; its entries are a's now");
+  await until(() => JSON.parse(fs.readFileSync(path.join(dir, "index-a.json"), "utf8")).entries.length === 3, 2000);
+  // A third window starting later finds it all in one index, with b's files still there.
+  const c = new PlayedAudio(dir, () => 600, { token: "c", isLive });
+  c.load();
+  assert.deepEqual(names(c), ["a1", "b1", "a2"]);
+  await c.clear();
+  assert.deepEqual(names(c), []);
+  assert.deepEqual(
+    fs.readdirSync(dir).filter((f) => f.endsWith(".wav")),
+    [],
+    "a reset removes every window's audio"
+  );
+});
+
+test("audio no index claims is swept once it is old, and a shorter setting is applied on the spot", async () => {
+  const dir = path.join(tmpDir(), "played");
+  fs.mkdirSync(dir, { recursive: true });
+  const old = writeWav(path.join(dir, "pz-1.wav"), 0.1);
+  const stale = `${path.join(dir, "pz-2.wav")}.tmp`;
+  fs.writeFileSync(stale, "half");
+  const ago = new Date(Date.now() - 5 * 60_000);
+  fs.utimesSync(old, ago, ago);
+  fs.utimesSync(stale, ago, ago);
+  const fresh = writeWav(path.join(dir, "pz-3.wav"), 0.1); // another window may be about to claim this one
+  let keep = 600;
+  const buffer = new PlayedAudio(dir, () => keep, { token: "w" });
+  buffer.load();
+  assert.deepEqual(
+    [old, stale, fresh].map((f) => fs.existsSync(f)),
+    [false, false, true]
+  );
+  for (let i = 0; i < 3; i++) {
+    buffer.retain(utterance({ text: `s${i}`, parts: [writeWav(path.join(tmpDir(), `q${i}.wav`), 0.5)] }));
+  }
+  await buffer.ready();
+  assert.equal(buffer.list().length, 3);
+  keep = 1.0;
+  buffer.enforce();
+  assert.deepEqual(
+    buffer.list().map((e) => e.text),
+    ["s1", "s2"],
+    "the setting was lowered: the oldest went at once"
+  );
+  keep = 0;
+  buffer.enforce();
+  await until(() => buffer.list().length === 0, 2000);
+  assert.deepEqual(
+    fs.readdirSync(dir).filter((f) => /^pw-/.test(f)),
+    [],
+    "0 keeps nothing, including what was there"
+  );
+});
+
+test("a closed window adopted by two windows at once is listed once", async () => {
+  const dir = path.join(tmpDir(), "played");
+  fs.mkdirSync(dir, { recursive: true });
+  // The index a window left behind when it closed, with one sentence.
+  const file = writeWav(path.join(dir, "pd-1.wav"), 0.2);
+  const entry = {
+    ...utterance({ text: "left behind" }),
+    id: 1,
+    at: 1000,
+    seconds: 0.2,
+    sampleRate: 24000,
+    bytes: 9644,
+    file,
+  };
+  delete entry.startedAt;
+  const dead = JSON.stringify({ version: 2, token: "d", entries: [entry] });
+  fs.writeFileSync(path.join(dir, "index-d.json"), dead);
+  const live = new Set(["a", "b"]);
+  const a = new PlayedAudio(dir, () => 600, { token: "a", isLive: (t) => live.has(t) });
+  const b = new PlayedAudio(dir, () => 600, { token: "b", isLive: (t) => live.has(t) });
+  a.load();
+  // Two windows starting at the same moment both read the index before
+  // either removes it: the second reading is replayed here.
+  fs.writeFileSync(path.join(dir, "index-d.json"), dead);
+  b.load();
+  await until(
+    () => fs.existsSync(path.join(dir, "index-a.json")) && fs.existsSync(path.join(dir, "index-b.json")),
+    2000
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(
+    b.list().map((e) => e.text),
+    ["left behind"],
+    "one sentence, however many indexes name it"
+  );
+  assert.ok(!fs.existsSync(path.join(dir, "index-d.json")));
+  // A window with nothing of its own writes no index.
+  const c = new PlayedAudio(dir, () => 600, { token: "c", isLive: (t) => live.has(t) });
+  c.load();
+  await new Promise((r) => setTimeout(r, 400));
+  assert.ok(!fs.existsSync(path.join(dir, "index-c.json")), "nothing to list, no index");
+});

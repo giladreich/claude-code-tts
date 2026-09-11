@@ -1,7 +1,7 @@
 import { ChildProcess, execFile, spawn } from "child_process";
 import { hasCommand } from "../platform/platform";
 import { reportPlayed } from "./played";
-import { Backend, SpeakRequest, Speaker, VoiceInfo, wrapProcess } from "./types";
+import { Backend, killProcess, SpeakRequest, Speaker, VoiceInfo, wrapProcess } from "./types";
 
 /**
  * The OS-provided engines: `say` on macOS, espeak/speech-dispatcher on Linux,
@@ -146,13 +146,25 @@ function speakAndReport(
   };
 }
 
+/** A render that takes longer than this is not going to finish; it is killed rather than waited for. */
+const RENDER_TIMEOUT_MS = 90_000;
+
 /** Resolves when a rendering process exits cleanly; the last stderr line otherwise. */
 function rendered(child: ChildProcess, stdinText: string, name: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let stderr = "";
+    const timer = setTimeout(() => {
+      killProcess(child);
+      reject(new Error(`${name} took too long to render`));
+    }, RENDER_TIMEOUT_MS);
+    timer.unref?.();
     child.stderr?.on("data", (d) => (stderr = (stderr + String(d)).slice(-400)));
-    child.on("error", reject);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
     child.on("exit", (code) => {
+      clearTimeout(timer);
       if (code === 0) {
         return resolve();
       }
@@ -169,9 +181,11 @@ const saySafe = (text: string): string => text.replace(/\[\[/g, "( (");
 
 /** The same utterance `say` spoke, written as a 16-bit WAV. */
 function renderDarwin(req: SpeakRequest, out: string): Promise<void> {
+  // 16-bit at the voice's own sample rate: naming a rate here would resample
+  // a voice that speaks at a higher one.
   // prettier-ignore
   const args = [
-    "-o", out, "--file-format=WAVE", "--data-format=LEI16@22050",
+    "-o", out, "--file-format=WAVE", "--data-format=LEI16",
     "-r", String(req.wpm), ...(req.voice ? ["-v", req.voice] : []),
   ];
   const child = spawn("say", args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
@@ -262,10 +276,18 @@ const sapiRate = (wpm: number): number => Math.max(-10, Math.min(10, Math.round(
 
 const psQuote = (s: string): string => s.replace(/'/g, "''");
 
+/**
+ * The text arrives on stdin as UTF-8, and the console would otherwise decode
+ * it with the system code page: a sentence with an accent or another script
+ * in it was read as other characters.
+ */
+const PS_UTF8 = "try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch {}; ";
+
 /** The same utterance System.Speech spoke, written as a WAV. */
 function renderWindows(req: SpeakRequest, out: string): Promise<void> {
   const voicePs = psQuote(req.voice);
   const script =
+    PS_UTF8 +
     "Add-Type -AssemblyName System.Speech; " +
     "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
     `$s.Rate = ${sapiRate(req.wpm)}; ` +
@@ -287,6 +309,7 @@ function windowsBackend(): Backend {
       const { text, wpm, voice, volume } = req;
       const voicePs = psQuote(voice);
       const script =
+        PS_UTF8 +
         "Add-Type -AssemblyName System.Speech; " +
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
         `$s.Rate = ${sapiRate(wpm)}; ` +

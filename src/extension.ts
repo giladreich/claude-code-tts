@@ -472,20 +472,6 @@ export function activate(context: vscode.ExtensionContext): void {
     runtime.onError
   );
   cleanupStaleTempFiles();
-  // What was played is kept for a while, so it can be exported to a file the
-  // way it was heard. The engines offer each finished utterance; the setting
-  // is read live, so 0 stops the keeping at once.
-  const played = initPlayedAudio(path.join(context.globalStorageUri.fsPath, "played"), () => {
-    const minutes = config().exportKeepMinutes;
-    return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 0;
-  });
-  setPlayedSink((utterance) => played.retain(utterance));
-  context.subscriptions.push({
-    dispose: () => {
-      setPlayedSink(undefined);
-      played.flush();
-    },
-  });
   runtime.translator = newTranslator();
   context.subscriptions.push({ dispose: () => runtime.translator?.dispose() });
   if (config().speechConfig.speakLanguage) {
@@ -544,6 +530,28 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   runtime.ownership.start();
   context.subscriptions.push({ dispose: () => runtime.ownership?.dispose() });
+
+  // What was played is kept for a while, so it can be exported to a file the
+  // way it was heard. The engines offer each finished utterance; the setting
+  // is read live, so 0 stops the keeping at once. Every window keeps its own
+  // audio under its window id, and the registry above says which windows are
+  // still open, so a closed window's audio is adopted rather than stranded.
+  const ownership = runtime.ownership;
+  const played = initPlayedAudio(
+    path.join(context.globalStorageUri.fsPath, "played"),
+    () => {
+      const minutes = config().exportKeepMinutes;
+      return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 0;
+    },
+    { token: ownership.id, isLive: (token) => ownership.liveIds().includes(token) }
+  );
+  setPlayedSink((utterance) => played.retain(utterance));
+  context.subscriptions.push({
+    dispose: () => {
+      setPlayedSink(undefined);
+      played.flush();
+    },
+  });
 
   // A terminal is often where the user is when they want the voice to stop.
   runtime.control = new ControlWatcher((command) => background("control command", () => runControlCommand(command)));
@@ -863,6 +871,9 @@ export function activate(context: vscode.ExtensionContext): void {
         e.affectsConfiguration("claudeCodeTts.piper")
       ) {
         trackEngineReady();
+      }
+      if (e.affectsConfiguration("claudeCodeTts.export")) {
+        played.enforce(); // fewer minutes, or none: applied now, not at the next sentence
       }
       if (e.affectsConfiguration("claudeCodeTts.notifications")) {
         // A sound turned on or off changes which hooks are needed: an event

@@ -671,15 +671,15 @@ test("an utterance carries the message it belongs to through coalescing, and an 
     undefined,
     () => eng
   );
-  q.enqueue("First sentence of the answer.", 7);
-  q.enqueue("Bash: run tests.", 7);
-  q.enqueue("Read: file.", 8); // short: merges into the queued announcement, which keeps its message
+  q.enqueue("First sentence of the answer.", "m7");
+  q.enqueue("Bash: run tests.", "m7");
+  q.enqueue("Read: file.", "m8"); // short: merges into the queued announcement, which keeps its message
   await until(() => eng.events.length === 2, 2000);
   assert.deepEqual(
     eng.events.map((e) => [e.text, e.group]),
     [
-      ["First sentence of the answer.", 7],
-      ["Bash: run tests. Read: file.", 7],
+      ["First sentence of the answer.", "m7"],
+      ["Bash: run tests. Read: file.", "m7"],
     ]
   );
   await sleep(60);

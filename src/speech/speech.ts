@@ -98,7 +98,7 @@ const RATE_STEP = 0.04;
 interface QueueItem {
   text: string;
   /** The message (turn) it belongs to, so what was played can be exported per message. */
-  group?: number;
+  group?: string;
 }
 
 /**
@@ -113,7 +113,7 @@ export class SpeechQueue {
   private lastEffectiveRate: number | undefined;
   /** Text of the utterance in `current`, so a preview can put it back. */
   private currentText = "";
-  private currentGroup: number | undefined;
+  private currentGroup: string | undefined;
   private previewSpeaker: Speaker | undefined;
   private previewActive = false;
   private previewDone: (() => void) | undefined;
@@ -275,7 +275,7 @@ export class SpeechQueue {
   /** Language of the message being spoken, kept across short utterances. */
   private languages = new LanguageTracker();
 
-  enqueue(text: string, group?: number): void {
+  enqueue(text: string, group?: string): void {
     // Last line of defence for every path into the queue (translation,
     // selection, tests): an utterance with nothing to pronounce is dropped
     // rather than handed to an engine that crashes on it.

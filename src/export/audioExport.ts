@@ -91,6 +91,28 @@ export function missingFor(format: ExportFormat, enc: Encoders): "ffmpeg" | unde
 /** Matching the played tempo needs a time-stretch, which only ffmpeg provides here. */
 export const canStretch = (enc: Encoders): boolean => !!enc.ffmpeg;
 
+/**
+ * The format a chosen file name asks for. Typing ".wav" into the save box
+ * means WAV, whatever the sheet said, when this machine can write it; an
+ * extension that names nothing this can write keeps the sheet's format and
+ * the file gets that format's extension.
+ */
+export function formatForPath(
+  fsPath: string,
+  format: ExportFormat,
+  enc: Encoders
+): { format: ExportFormat; path: string } {
+  const ext = path.extname(fsPath).slice(1).toLowerCase();
+  if (ext === FORMATS[format].ext) {
+    return { format, path: fsPath };
+  }
+  const named = (Object.keys(FORMATS) as ExportFormat[]).find((f) => FORMATS[f].ext === ext);
+  if (named && !missingFor(named, enc)) {
+    return { format: named, path: fsPath };
+  }
+  return { format, path: `${fsPath}.${FORMATS[format].ext}` };
+}
+
 /** One utterance placed on the export's own clock. */
 export interface Segment {
   entry: PlayedEntry;
@@ -144,7 +166,7 @@ export const totalSeconds = (segments: Segment[]): number => (segments.length ? 
 /** A message as the picker offers it: the consecutive entries of one group. */
 export interface PlayedMessage {
   entries: PlayedEntry[];
-  group?: number;
+  group?: string;
 }
 
 /**
@@ -266,10 +288,12 @@ export interface ExportRequest {
   out: string;
   /** Scratch directory for the assembled WAV and stretched parts; the caller removes it. */
   workDir: string;
-  title?: string;
   signal?: AbortSignal;
   onProgress?: (fraction: number) => void;
 }
+
+/** How many segments are prepared ahead of the one being written: ffmpeg's start-up costs overlap. */
+const PREPARE_AHEAD = 3;
 
 export interface ExportResult {
   seconds: number;
@@ -303,20 +327,30 @@ export async function exportAudio(req: ExportRequest): Promise<ExportResult> {
     written += buf.length;
   };
   const silence = (seconds: number) => Buffer.alloc(Math.max(0, Math.round(seconds * rate)) * 2);
+  // Segments are prepared a few ahead of the one being written, so the
+  // stretching (one ffmpeg each) runs alongside the file work rather than
+  // in front of it; the writer still consumes them in order.
+  const prepared = new Map<number, Promise<Buffer>>();
+  const prepare = (i: number) => {
+    if (i < chosen.length && !prepared.has(i)) {
+      const p = pcmFor(chosen[i], rate, req);
+      p.catch(() => undefined); // failures surface when the writer reaches it
+      prepared.set(i, p);
+    }
+  };
   try {
     put(Buffer.alloc(44)); // header comes last, once the length is known
     let cursor = start;
-    // The next segment is prepared while this one is written, so ffmpeg's
-    // start-up cost overlaps the file work rather than adding to it.
-    let next: Promise<Buffer> | undefined = pcmFor(chosen[0], rate, req);
     for (let i = 0; i < chosen.length; i++) {
       if (req.signal?.aborted) {
-        next?.catch(() => undefined); // it is being killed too; nobody else will hear it fail
         throw new Error("cancelled");
       }
+      for (let j = i; j <= i + PREPARE_AHEAD; j++) {
+        prepare(j);
+      }
       const seg = chosen[i];
-      const pcm = await next!;
-      next = i + 1 < chosen.length ? pcmFor(chosen[i + 1], rate, req) : undefined;
+      const pcm = await prepared.get(i)!;
+      prepared.delete(i);
       if (seg.t0 > cursor) {
         put(silence(seg.t0 - cursor));
         cursor = seg.t0;
@@ -340,10 +374,24 @@ export async function exportAudio(req: ExportRequest): Promise<ExportResult> {
   if (req.signal?.aborted) {
     throw new Error("cancelled");
   }
-  await encode(assembled, req);
+  // Encoded beside the assembly and moved into place last, so a failure or
+  // a cancellation leaves whatever was at the destination untouched.
+  const encoded = path.join(req.workDir, `export.${FORMATS[req.format].ext}`);
+  await encode(assembled, encoded, req, firstWords(chosen[0].entry.text, 60));
+  moveInto(encoded, req.out);
   req.onProgress?.(1);
   const bytes = fs.statSync(req.out).size;
   return { seconds: (written - 44) / 2 / rate, bytes };
+}
+
+/** Rename where the destination is on the same volume, copy where it is not. */
+function moveInto(from: string, to: string): void {
+  try {
+    fs.renameSync(from, to);
+  } catch {
+    fs.copyFileSync(from, to);
+    fs.rmSync(from, { force: true });
+  }
 }
 
 /** The 16-bit mono PCM of one segment at the export's rate, stretched as the timeline says. */
@@ -401,12 +449,11 @@ export function resample(pcm: Buffer, from: number, to: number): Buffer {
   return out;
 }
 
-async function encode(wav: string, req: ExportRequest): Promise<void> {
-  const { format, quality, encoders, out } = req;
+async function encode(wav: string, out: string, req: ExportRequest, title: string): Promise<void> {
+  const { format, quality, encoders } = req;
   const bitrate = FORMATS[format].bitrates?.[quality];
-  fs.rmSync(out, { force: true });
   if (format === "wav") {
-    fs.copyFileSync(wav, out);
+    fs.renameSync(wav, out);
     return;
   }
   if (format === "m4a" && !encoders.ffmpeg && encoders.afconvert) {
@@ -422,15 +469,22 @@ async function encode(wav: string, req: ExportRequest): Promise<void> {
     opus: ["-c:a", "libopus", "-b:a", `${bitrate}k`],
     flac: ["-c:a", "flac"],
   };
-  const meta = req.title ? ["-metadata", `title=${req.title}`] : [];
-  // prettier-ignore
-  await run(encoders.ffmpeg, [
-    "-y", "-nostdin", "-loglevel", "error",
-    "-i", wav,
-    ...codec[format], ...meta,
-    "-metadata", "comment=Exported by Claude Code TTS",
-    out,
-  ], req.signal);
+  const meta = title ? ["-metadata", `title=${title}`] : [];
+  try {
+    // prettier-ignore
+    await run(encoders.ffmpeg, [
+      "-y", "-nostdin", "-loglevel", "error",
+      "-i", wav,
+      ...codec[format], ...meta,
+      "-metadata", "comment=Exported by Claude Code TTS",
+      out,
+    ], req.signal);
+  } catch (e) {
+    if (/unknown encoder|encoder .* not found/i.test((e as Error).message)) {
+      throw new Error(`this ffmpeg was built without a ${FORMATS[format].label} encoder`, { cause: e });
+    }
+    throw e;
+  }
 }
 
 function run(cmd: string, args: string[], signal?: AbortSignal): Promise<void> {

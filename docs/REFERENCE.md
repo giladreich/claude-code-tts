@@ -185,7 +185,7 @@ The first row of the sheet exports with what is set; the defaults are a good MP3
 | Speed | As played | The tempo the player applied, including the speed-up while catching up on a backlog, or the voice's own pace. Either needs `ffmpeg`; without it the audio is exported exactly as the voice produced it |
 | Pauses | Natural, up to 0.6 s | The pauses between sentences as they were heard, shortened: a wait for synthesis or for Claude's next paragraph was silence at the time. Tight (0.15 s) or as heard (up to 4 s) |
 
-The file is named after the date and time and offered in your Downloads folder; the folder you choose and the choices you make are remembered for the next export. `export.keepMinutes` says how much is kept: 30 minutes of speech by default, about 3 MB a minute, in the extension's own storage. Sentences you skipped are not kept, auditions from the voice pickers are not, and nothing is kept at all when it is `0`. "Storage and Cleanup" lists what is there, and **Reset Settings to Defaults** empties it.
+The file is named after the date and time and offered in your Downloads folder; the folder you choose and the choices you make are remembered for the next export, and an extension you type into the save box (`.wav`, say) is honoured. `export.keepMinutes` says how much is kept: 30 minutes of speech by default, about 3 MB a minute, in the extension's own storage. Every open window keeps what it spoke, and the export offers all of it together. Sentences you skipped are not kept, auditions from the voice pickers are not, and nothing is kept at all when it is `0`, which also removes what was kept. "Storage and Cleanup" lists what is there, and **Reset Settings to Defaults** empties it.
 
 ## Sizes and speeds
 
@@ -246,7 +246,7 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 | Pause mid-word | yes | yes | no (finishes the utterance, then holds) |
 | Clone from the microphone | yes | yes, with `ffmpeg` (PulseAudio or ALSA) | yes, with `ffmpeg` (you pick the input device) |
 | Clone from an audio or video file | yes | yes, with `ffmpeg` installed | yes, with `ffmpeg` installed |
-| Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg` | WAV; the rest with `ffmpeg` |
+| Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg`. The system voice through speech-dispatcher (`spd-say`) writes no audio and cannot be exported; `espeak-ng` can | WAV; the rest with `ffmpeg` |
 | Design a voice from a description | yes | yes | yes |
 | Completion sounds (hooks) | yes, per-event sound choice | yes, per-event choice from the desktop sound themes | yes, per-event choice from `C:\Windows\Media` |
 

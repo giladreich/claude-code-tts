@@ -114,7 +114,7 @@ export interface SpeakRequest {
   /** An audition from a picker, not something Claude said: never kept for export. */
   preview?: boolean;
   /** The message this belongs to (see speaking.ts), so an export can offer messages. */
-  group?: number;
+  group?: string;
 }
 
 /** One utterance in flight. */

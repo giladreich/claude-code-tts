@@ -313,7 +313,7 @@ Dev dependencies: TypeScript, Prettier, ESLint (with typescript-eslint, @stylist
   chatterbox-venv/                     Chatterbox PyTorch runtime (off Apple Silicon)
   uv/                                  the private uv, its Python, its tool venvs and cache
   player.log, kokoro-daemon.log, qwen3-daemon.log, qwen3-design.log, chatterbox-daemon.log, translate-daemon.log
-  played/p<id>.wav, played/index.json    spoken audio kept for export (export.keepMinutes, oldest out first)
+  played/p<window>-<n>.wav, played/index-<window>.json   spoken audio kept for export, one index per window (export.keepMinutes, oldest out first)
   claude-code-tts-notify.js               hook script (version-stable path)
 ~/.claude/claude-code-tts-notify.json     per-category notification sounds
 ~/.claude/settings.json                hook entries (only ours are touched; backup kept)

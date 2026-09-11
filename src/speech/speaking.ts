@@ -28,7 +28,7 @@ export function translating(): boolean {
 }
 
 /** Chunk a block for the current engine and queue the pieces in order. */
-export function enqueueChunked(text: string, group?: number): void {
+export function enqueueChunked(text: string, group?: string): void {
   const { engine, qwen3Model } = config().speechConfig;
   for (const chunk of chunkForSpeech(text, chunkPlanFor(engine, qwen3Model), (runtime.speech?.pending ?? 0) === 0)) {
     runtime.speech?.enqueue(chunk, group);
@@ -43,15 +43,18 @@ export function enqueueChunked(text: string, group?: number): void {
  * two answers arriving at once do not share one.
  */
 let lastGroup = 0;
-const groupBySession = new Map<string, number>();
+// Several windows keep their audio in one place, so a message name has to
+// be one no other window (or an earlier life of this one) could have used.
+const GROUP_PREFIX = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}-`;
+const groupBySession = new Map<string, string>();
 
 /** A fresh message of its own: a repeated message, a spoken selection. */
-export function newSpeechGroup(): number {
-  return ++lastGroup;
+export function newSpeechGroup(): string {
+  return `${GROUP_PREFIX}${++lastGroup}`;
 }
 
 /** The message a session is on; `startsNew` when its transcript just received a prompt. */
-export function speechGroupFor(session: string, startsNew: boolean): number {
+export function speechGroupFor(session: string, startsNew: boolean): string {
   if (startsNew || !groupBySession.has(session)) {
     groupBySession.set(session, newSpeechGroup());
   }
@@ -67,7 +70,7 @@ export function isPromptLine(line: string): boolean {
   return line.includes('"type":"user"') && !line.includes('"tool_result"') && !line.includes('"isMeta":true');
 }
 
-export function speakLine(text: string, group?: number): void {
+export function speakLine(text: string, group?: string): void {
   if (!translating()) {
     runtime.speech?.enqueue(text, group);
     return;

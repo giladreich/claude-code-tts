@@ -18,7 +18,7 @@ export interface PlayedUtterance {
   wpm: number;
   language?: string;
   /** The message this belongs to, as the queue was told (see speaking.ts). */
-  group?: number;
+  group?: string;
   /** The playback tempo the player applied; 1 when the audio was played as it was. */
   tempo: number;
   /** The speed the engine baked into the audio itself; 1 at its natural pace. */

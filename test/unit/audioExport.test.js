@@ -11,6 +11,7 @@ const {
   exportAudio,
   findEncoders,
   firstWords,
+  formatForPath,
   messagesOf,
   missingFor,
   parseRange,
@@ -115,22 +116,28 @@ test("sizes follow the bitrate, ranges read the way a person types them, and the
   );
   assert.equal(firstWords("short", 30), "short");
   const groups = messagesOf([
-    { group: 1 },
-    { group: 1 },
-    { group: 2 },
+    { group: "a-1" },
+    { group: "a-1" },
+    { group: "a-2" },
     { group: undefined },
     { group: undefined },
-    { group: 2 },
+    { group: "a-2" },
   ]);
   assert.deepEqual(
     groups.map((m) => [m.group, m.entries.length]),
     [
-      [1, 2],
-      [2, 1],
+      ["a-1", 2],
+      ["a-2", 1],
       [undefined, 2],
-      [2, 1],
+      ["a-2", 1],
     ]
   );
+  // A typed extension is a choice; one this machine cannot write is not.
+  const enc = { ffmpeg: "/x/ffmpeg" };
+  assert.deepEqual(formatForPath("/tmp/a.mp3", "mp3", enc), { format: "mp3", path: "/tmp/a.mp3" });
+  assert.deepEqual(formatForPath("/tmp/a.WAV", "mp3", enc), { format: "wav", path: "/tmp/a.WAV" });
+  assert.deepEqual(formatForPath("/tmp/a.opus", "mp3", {}), { format: "mp3", path: "/tmp/a.opus.mp3" });
+  assert.deepEqual(formatForPath("/tmp/a", "m4a", {}), { format: "m4a", path: "/tmp/a.m4a" });
 });
 
 test("without ffmpeg the export is exact PCM: pauses inserted, the range cut, a second sample rate resampled", async () => {
@@ -271,3 +278,22 @@ test(
     );
   }
 );
+
+test("a failed export leaves whatever was at the destination untouched", async () => {
+  const dir = tmpDir();
+  const out = path.join(dir, "keep.mp3");
+  fs.writeFileSync(out, "the file that was there");
+  const segments = timeline([entry(dir, 1)], "asIs", "natural");
+  await assert.rejects(
+    exportAudio({
+      segments,
+      format: "mp3",
+      quality: "good",
+      encoders: { ffmpeg: path.join(dir, "no-such-ffmpeg") },
+      out,
+      workDir: path.join(dir, "w"),
+    }),
+    /ffmpeg failed/
+  );
+  assert.equal(fs.readFileSync(out, "utf8"), "the file that was there");
+});

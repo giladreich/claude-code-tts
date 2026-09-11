@@ -92,7 +92,7 @@ recreates it.
 | `~/.claude/claude-code-tts-windows/` | One small file per open VSCode window (its id, its process id, its open folders, a heartbeat) so that only one window speaks a session. Shared with other VSCode builds for the same reason; removed when a window closes |
 | `~/.claude/settings.json` | Hook entries pointing at the bundled notify script, which is copied to `<globalStorage>/claude-code-tts-notify.js`. Only our own entries are touched, and `~/.claude/settings.json.claude-code-tts-backup` is written before the first change and kept |
 | `$TMPDIR/claude-code-tts-*.wav` | Audio parts in flight, deleted after playback (stale files are swept after 10 minutes) |
-| `<globalStorage>/played/` | The last minutes of spoken audio (the `export.keepMinutes` setting: 30 by default, `0` keeps nothing), one WAV per sentence with the text it was made from, so "Export Spoken Audio to a File" can write what was heard. Oldest out first; "Storage and Cleanup" removes it, and so does a settings reset |
+| `<globalStorage>/played/` | The last minutes of spoken audio (the `export.keepMinutes` setting: 30 by default, `0` keeps nothing and removes what was kept), one WAV per sentence plus an index per window with the text each sentence was made from, so "Export Spoken Audio to a File" can write what was heard. Oldest out first; "Storage and Cleanup" removes it, and so does a settings reset |
 | An audio export you create | Wherever you save it: what was spoken, as a listenable file |
 | A voice backup you create | Wherever you save it: contains the reference recording and its transcript, so treat it like the original recording |
 
