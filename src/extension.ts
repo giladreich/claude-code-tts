@@ -193,7 +193,7 @@ async function greetOrWarn(): Promise<void> {
     }
     await seen.update("warned:no-claude-code", true);
     const pick = await vscode.window.showInformationMessage(
-      "Claude Code TTS reads what Claude Code writes, and Claude Code does not seem to be installed on this machine. Once it has run once, its runtime.output will be spoken here.",
+      "Claude Code TTS reads what Claude Code writes, and Claude Code does not seem to be installed on this machine. Once it has run once, its output will be spoken here.",
       "How to install Claude Code"
     );
     if (pick) {
@@ -293,7 +293,7 @@ function countSpoken(n: number): void {
  */
 async function runControlCommand(command: ControlCommand): Promise<void> {
   const c = vscode.workspace.getConfiguration("claudeCodeTts");
-  runtime.output.appendLine(`[runtime.control] ${command.verb}${command.rate ? ` ${command.rate}` : ""}`);
+  runtime.output.appendLine(`[control] ${command.verb}${command.rate ? ` ${command.rate}` : ""}`);
   switch (command.verb) {
     case "mute":
     case "unmute":
@@ -517,7 +517,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Sessions started in a terminal belong to no window, so without a rule
   // every open window would speak them at once. The registry decides: each
   // window speaks its own folders, and the window open longest speaks the
-  // rest. See src/sessionOwnership.ts.
+  // rest. See src/session/sessionOwnership.ts.
   runtime.ownership = new SessionOwnership({
     dir: registryDir(context.globalStorageUri.fsPath),
     dirs: () => [...scopedDirs],
@@ -526,9 +526,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => runtime.ownership?.dispose() });
 
   // A terminal is often where the user is when they want the voice to stop.
-  runtime.control = new ControlWatcher((command) =>
-    background("runtime.control command", () => runControlCommand(command))
-  );
+  runtime.control = new ControlWatcher((command) => background("control command", () => runControlCommand(command)));
   runtime.control.start();
   context.subscriptions.push({ dispose: () => runtime.control?.dispose() });
 

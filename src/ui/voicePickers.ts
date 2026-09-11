@@ -95,7 +95,7 @@ export async function selectEngine(back = false): Promise<MenuOutcome> {
       label: e.id === recommended ? `${e.label} (recommended)` : e.label,
       description: mark(e.id),
     })),
-    { placeHolder: "Text-to-runtime.speech engine", title: `Engine (now: ${engineName()})`, matchOnDetail: true },
+    { placeHolder: "Text-to-speech engine", title: `Engine (now: ${engineName()})`, matchOnDetail: true },
     back
   );
   if (picked === "back") {
@@ -609,7 +609,7 @@ export async function selectQwen3Model(back = false): Promise<MenuOutcome> {
         label: "Larger and more natural",
         description: state("1.7B"),
         detail:
-          "Closer to the voice it is cloning. Slower than realtime on most machines (measured making 8 s of runtime.speech in 15 s), so it cannot be sped up past its natural pace. 4.2 GB.",
+          "Closer to the voice it is cloning. Slower than realtime on most machines (measured making 8 s of speech in 15 s), so it cannot be sped up past its natural pace. 4.2 GB.",
         size: "1.7B",
       },
     ],

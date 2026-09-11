@@ -133,7 +133,7 @@ export async function voiceAndSpeedMenuOnce(back: boolean): Promise<MenuOutcome>
           ]
         : []),
       {
-        label: "$(dashboard) Set runtime.speech rate...",
+        label: "$(dashboard) Set speech rate...",
         detail: `${speechConfig.rate} wpm`,
         command: "claudeCodeTts.selectRate",
         args: [true],
@@ -163,7 +163,7 @@ export async function voiceAndSpeedMenuOnce(back: boolean): Promise<MenuOutcome>
         },
       },
       {
-        label: "$(settings-gear) All runtime.speech settings...",
+        label: "$(settings-gear) All speech settings...",
         run: () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:giladreich.claude-code-tts"),
       },
     ],
@@ -251,7 +251,7 @@ export async function setupMenuOnce(back: boolean): Promise<MenuOutcome> {
         command: "claudeCodeTts.storage",
         args: [true],
       },
-      { label: "$(runtime.output) Show spoken log", command: "claudeCodeTts.showLog", closeAfter: true },
+      { label: "$(output) Show spoken log", command: "claudeCodeTts.showLog", closeAfter: true },
       {
         label: "$(folder-opened) Open diagnostics folder",
         detail: "Daemon and player logs, for a bug report",
@@ -282,7 +282,7 @@ export async function setupMenuOnce(back: boolean): Promise<MenuOutcome> {
 export async function showHistory(back = false): Promise<MenuOutcome> {
   if (spokenMessages().length === 0) {
     vscode.window.showInformationMessage(
-      "Claude Code TTS: no spoken messages recorded yet. Messages appear here once Claude produces prose runtime.output."
+      "Claude Code TTS: no spoken messages recorded yet. Messages appear here once Claude produces prose output."
     );
     return back ? "back" : "closed";
   }

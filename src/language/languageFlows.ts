@@ -507,7 +507,7 @@ async function setLanguageVoiceOnce(back: boolean): Promise<MenuOutcome> {
         detail:
           process.platform === "darwin"
             ? "Add a system voice in System Settings > Accessibility > Spoken Content > System Voice > Manage Voices"
-            : "Install a voice for this language in your operating system's runtime.speech settings",
+            : "Install a voice for this language in your operating system's speech settings",
       });
     }
   } else if (engine === "kokoro") {
@@ -575,7 +575,7 @@ async function setLanguageVoiceOnce(back: boolean): Promise<MenuOutcome> {
         detail:
           process.platform === "darwin"
             ? "Add one in System Settings > Accessibility > Spoken Content > System Voice > Manage Voices"
-            : "Install a voice for this language in your operating system's runtime.speech settings",
+            : "Install a voice for this language in your operating system's speech settings",
       });
     }
   }
