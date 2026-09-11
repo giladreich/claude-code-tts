@@ -13,7 +13,8 @@ import * as os from "os";
 import * as path from "path";
 import { uvToolPython } from "../platform/platform";
 import { PyTtsDaemon } from "./pyDaemon";
-import { pipelineLog, StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
+import { StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
+import { pipelineLog } from "./wavPlayers";
 import { SpeedMemory, Backend } from "./types";
 import { trimSilence, wavFileSeconds } from "./wav";
 

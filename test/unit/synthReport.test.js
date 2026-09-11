@@ -4,7 +4,8 @@
 // the sustainable-rate cap must follow the machine, not the benchmark.
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { synthesizeThenPlayBackend, playbackTempo, TEMPO_DEADBAND } = require("../../out/tts/synthPlay.js");
+const { synthesizeThenPlayBackend } = require("../../out/tts/synthPlay.js");
+const { playbackTempo, TEMPO_DEADBAND } = require("../../out/tts/wavPlayers.js");
 const { writeWav, until } = require("../helpers");
 
 test("a slow synthesis report lowers the sustainable rate to natural pace; a fast one does not raise it above the declared figure", async () => {

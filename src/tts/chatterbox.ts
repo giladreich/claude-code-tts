@@ -38,7 +38,8 @@ import { ENGINE_LANGUAGES, languageName } from "../language/language";
 import { sitePackageExists, uvToolPython, venvPython } from "../platform/platform";
 import { PyTtsDaemon } from "./pyDaemon";
 import { CloneProfile, listQwen3Clones } from "./qwen3";
-import { pipelineLog, StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
+import { StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
+import { pipelineLog } from "./wavPlayers";
 import { Backend, SpeedMemory } from "./types";
 
 export function chatterboxVenv(globalStoragePath: string): string {

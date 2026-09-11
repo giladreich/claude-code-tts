@@ -3,9 +3,19 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { getPersistentPlayer } from "./audio";
-import { hasCommand } from "../platform/platform";
-import { Backend, killProcess } from "./types";
+import { reportPlayed } from "./played";
+import { Backend, killProcess, SpeakRequest } from "./types";
 import { wavFileSeconds } from "./wav";
+import {
+  clamp,
+  findWavPlayer,
+  pipelineLog,
+  playbackTempo,
+  SYNTH_SPEED_MAX,
+  SYNTH_SPEED_MIN,
+  TEMPO_MAX,
+  TEMPO_MIN,
+} from "./wavPlayers";
 
 /**
  * Shared machinery for engines that synthesize an utterance to a WAV file and
@@ -55,190 +65,6 @@ interface Synthesis {
   cancel: () => void;
   /** Speed baked into the synthesized audio itself (vs natural pace). */
   synthSpeed: number;
-}
-
-interface WavPlayer {
-  cmd: string;
-  /** Whether the player can time-stretch without pitch shift. */
-  supportsTempo: boolean;
-  args: (file: string, volume: number, tempo: number) => string[];
-}
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-/**
- * The speed range, defined once. The player time-stretches without pitch
- * shift across all of it, and engines with their own speed control
- * synthesize across it too, so every rate the setting allows (70 to 450 wpm
- * around a natural pace of 175) is actually reachable instead of quietly
- * stopping at 2x.
- */
-export const TEMPO_MIN = 0.4;
-
-export const TEMPO_MAX = 3;
-
-/**
- * Rates this close to 1 are played untouched.
- *
- * The player's time-stretch is a phase vocoder, and a phase vocoder is never
- * free: measured on a cloned voice at 1.02x, where the retiming itself is
- * inaudible (30ms in a 3s sentence), it smeared the transients and overshot
- * a full-scale utterance to 1.36 (+2.7 dB), which the output then clipped,
- * first at 0.19s in. That is the harsh, robotic edge on the first syllable.
- * A rate inside the deadband is snapped to exactly 1, which the player
- * bypasses.
- */
-export const TEMPO_DEADBAND = 0.03;
-
-/** The rate to actually play at: the deadband, then the range. */
-export function playbackTempo(tempo: number): number {
-  const inRange = clamp(tempo, TEMPO_MIN, TEMPO_MAX);
-  return Math.abs(inRange - 1) <= TEMPO_DEADBAND ? 1 : inRange;
-}
-
-/** What an engine's own speed control accepts (Kokoro speed, Piper length scale). */
-export const SYNTH_SPEED_MIN = 0.4;
-
-export const SYNTH_SPEED_MAX = 2.6;
-
-/** atempo accepts 0.5-2.0; a chain of two covers the rest of the range. */
-function atempoChain(tempo: number): string {
-  if (tempo <= 2) {
-    return `atempo=${tempo.toFixed(2)}`;
-  }
-  const half = Math.sqrt(tempo);
-  return `atempo=${half.toFixed(2)},atempo=${half.toFixed(2)}`;
-}
-
-/**
- * Find a WAV player once. macOS has afplay; elsewhere ffplay (part of
- * ffmpeg) is preferred because it is the only widely available player that
- * offers both pitch-preserving tempo and volume, which is what keeps speed
- * control identical across platforms. sox, PulseAudio/ALSA and PowerShell
- * follow as fallbacks with fewer capabilities.
- */
-function findWavPlayer(): WavPlayer | undefined {
-  if (process.platform === "darwin") {
-    return {
-      cmd: "afplay",
-      supportsTempo: true,
-      args: (f, vol, tempo) => [
-        ...(tempo !== 1 ? ["-q", "1", "-r", tempo.toFixed(2)] : []),
-        ...(vol < 100 ? ["-v", (vol / 100).toFixed(2)] : []),
-        f,
-      ],
-    };
-  }
-  if (hasCommand("ffplay")) {
-    return {
-      cmd: "ffplay",
-      supportsTempo: true,
-      args: (f, vol, tempo) => {
-        const filters = [
-          // ffmpeg's atempo takes 0.5-2.0 per instance, so beyond that it is chained.
-          ...(tempo !== 1 ? [atempoChain(clamp(tempo, TEMPO_MIN, TEMPO_MAX))] : []),
-          ...(vol < 100 ? [`volume=${(vol / 100).toFixed(2)}`] : []),
-        ];
-        return ["-nodisp", "-autoexit", "-loglevel", "quiet", ...(filters.length ? ["-af", filters.join(",")] : []), f];
-      },
-    };
-  }
-  if (process.platform === "win32") {
-    return {
-      cmd: "powershell",
-      supportsTempo: false,
-      // prettier-ignore
-      args: (f) => [
-        "-NoProfile", "-NonInteractive",
-        "-Command", `(New-Object Media.SoundPlayer '${f.replace(/'/g, "''")}').PlaySync()`,
-      ],
-    };
-  }
-  const has = hasCommand;
-  if (has("play")) {
-    // sox: "tempo" time-stretches without pitch shift, "vol" scales level
-    return {
-      cmd: "play",
-      supportsTempo: true,
-      args: (f, vol, tempo) => [
-        "-q",
-        f,
-        ...(tempo !== 1 ? ["tempo", tempo.toFixed(2)] : []),
-        ...(vol < 100 ? ["vol", (vol / 100).toFixed(2)] : []),
-      ],
-    };
-  }
-  if (has("paplay")) {
-    // PulseAudio volume is 0-65536 (linear).
-    return {
-      cmd: "paplay",
-      supportsTempo: false,
-      args: (f, vol) => [...(vol < 100 ? [`--volume=${Math.round((vol / 100) * 65536)}`] : []), f],
-    };
-  }
-  if (has("aplay")) {
-    return { cmd: "aplay", supportsTempo: false, args: (f) => ["-q", f] };
-  }
-  return undefined;
-}
-
-/**
- * Remove synthesized WAVs orphaned by a crashed session (normal operation
- * unlinks each file right after playback). Call once at activation.
- */
-export function cleanupStaleTempFiles(): void {
-  const dir = os.tmpdir();
-  fs.readdir(dir, (err, files) => {
-    if (err) {
-      return;
-    }
-    const cutoff = Date.now() - 10 * 60 * 1000;
-    for (const f of files) {
-      if (!f.startsWith("claude-code-tts-") || !f.endsWith(".wav")) {
-        continue;
-      }
-      const full = path.join(dir, f);
-      fs.stat(full, (e, st) => {
-        if (!e && st.mtimeMs < cutoff) {
-          fs.unlink(full, () => {});
-        }
-      });
-    }
-  });
-}
-
-/** Diagnostic sink for pipeline decisions (set by the extension to its log). */
-let logRtf: (msg: string) => void = () => {};
-
-export function setPipelineLogger(fn: (msg: string) => void): void {
-  logRtf = fn;
-}
-
-/** Engines report lifecycle decisions (model unloaded, reloaded) to the same log. */
-export function pipelineLog(msg: string): void {
-  logRtf(msg);
-}
-
-/** What playback on this machine can do, for "Check Setup". */
-export function audioSupport(): { player: string; tempo: boolean } {
-  const p = findWavPlayer();
-  return { player: p?.cmd ?? "none", tempo: p?.supportsTempo ?? false };
-}
-
-/**
- * Play one WAV outside the speech queue (voice auditions in the cloning and
- * design flows). Uses the platform's player, so it works wherever the
- * extension does; the persistent player is reserved for the queue.
- */
-export function playWavFile(file: string, volumePercent: number): { stop: () => void; playing: boolean } {
-  const p = findWavPlayer();
-  if (!p) {
-    logRtf("no audio player found: install ffmpeg (ffplay), sox or pulseaudio-utils to hear auditions");
-    return { stop: () => {}, playing: false };
-  }
-  const proc = spawn(p.cmd, p.args(file, volumePercent, 1), { stdio: "ignore", windowsHide: true });
-  proc.on("error", () => {});
-  return { stop: () => killProcess(proc), playing: true };
 }
 
 export function synthesizeThenPlayBackend(params: {
@@ -387,6 +213,27 @@ export function synthesizeThenPlayBackend(params: {
   // without a language hint be replayed for one that had it.
   const key = (text: string, voice: string, synthSpeed: number, language?: string) =>
     `${synthSpeed.toFixed(2)}|${voice}|${language ?? ""}|${text}`;
+
+  /**
+   * Offer what just played for keeping (the export buffer, when one is
+   * listening); true means the files are its now and must not be deleted
+   * here. An audition is never offered: it is not something Claude said.
+   */
+  const report = (req: SpeakRequest, parts: string[], tempo: number, synthSpeed: number, startedAt: number): boolean =>
+    !req.preview &&
+    reportPlayed({
+      text: req.text,
+      engine: params.name,
+      voice: req.voice,
+      wpm: req.wpm,
+      language: req.language,
+      group: req.group,
+      tempo,
+      synthSpeed,
+      startedAt,
+      endedAt: Date.now(),
+      parts,
+    });
 
   function synth(text: string, voice: string, synthSpeed: number, urgent: boolean, language?: string): Synthesis {
     const wav = path.join(os.tmpdir(), `claude-code-tts-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
@@ -558,7 +405,7 @@ export function synthesizeThenPlayBackend(params: {
     volume: number,
     onDone: () => void,
     onError: (msg: string) => void,
-    textLength: number
+    req: SpeakRequest
   ) {
     const persistent = getPersistentPlayer()!;
     let killed = false;
@@ -571,22 +418,13 @@ export function synthesizeThenPlayBackend(params: {
       }
       session.parts = [];
     };
-    const finish = () => {
-      liveSynthSpeed = undefined;
-      retuneStream = undefined;
-      playerTempo = undefined;
-      cleanup();
-      if (!killed) {
-        onDone();
-      }
-    };
     // Never faster than the engine can produce, and never slower than the
     // engine's natural pace (slow-motion speech is not an improvement).
     const ceiling = () => clamp(Math.max(1, sustainableTempo()), TEMPO_MIN, TEMPO_MAX);
     const requested = clamp(wantedOf(lastWpm) / synthSpeed, TEMPO_MIN, TEMPO_MAX);
     const tempo = playbackTempo(Math.min(requested, ceiling()));
     if (tempo < requested - 0.02) {
-      logRtf(
+      pipelineLog(
         `playing at ${tempo.toFixed(2)}x instead of ${requested.toFixed(2)}x: the engine synthesizes at ${(1 / effectiveRtf()).toFixed(2)}x realtime`
       );
     }
@@ -596,7 +434,7 @@ export function synthesizeThenPlayBackend(params: {
     // seconds the shortfall is L * (tempo * rtf - 1), which must be in the
     // buffer before playback starts. Fast engines start at once.
     const rtf = effectiveRtf();
-    const audioSecs = ((textLength / 5.5 / naturalWpm) * 60) / synthSpeed; // ~5.5 chars per word
+    const audioSecs = ((req.text.length / 5.5 / naturalWpm) * 60) / synthSpeed; // ~5.5 chars per word
     const deficit = Math.max(0, audioSecs * (tempo * rtf - 1)) * 1.1;
     // Waiting is only worth it up to a point. Within this bound, buffering
     // buys continuous speech; beyond it the wait itself becomes the problem
@@ -604,7 +442,7 @@ export function synthesizeThenPlayBackend(params: {
     const MAX_PREBUFFER_SECONDS = 2;
     const prebufferSecs = Math.min(audioSecs, MAX_PREBUFFER_SECONDS, (rtf > 0.5 ? 0.4 : 0.1) + deficit);
     if (deficit > 0.5) {
-      logRtf(
+      pipelineLog(
         `prebuffering ${prebufferSecs.toFixed(1)}s (synthesis ${rtf.toFixed(2)}x realtime, tempo ${tempo.toFixed(2)}, sustainable ${sustainableTempo().toFixed(2)})`
       );
     }
@@ -614,6 +452,22 @@ export function synthesizeThenPlayBackend(params: {
     let fedSecs = 0;
     let playStartedAt = 0;
     let liveTempo = 0;
+    const finish = () => {
+      liveSynthSpeed = undefined;
+      retuneStream = undefined;
+      playerTempo = undefined;
+      // A stream that played to its end is offered for keeping with the
+      // tempo it started at; one that was cut short is not what anyone
+      // would export, and its parts go the way they always did.
+      const parts = session.parts.map((p) => p.file);
+      if (!killed && playStartedAt > 0 && report(req, parts, tempo, synthSpeed, playStartedAt)) {
+        session.parts = [];
+      }
+      cleanup();
+      if (!killed) {
+        onDone();
+      }
+    };
     const queued: { file: string; final: boolean }[] = [];
     const start = () => {
       for (const q of queued) {
@@ -637,7 +491,9 @@ export function synthesizeThenPlayBackend(params: {
         // easier to follow than speech that stops at every part boundary.
         liveTempo = Math.max(0.8, liveTempo * 0.85);
         setPlayerRate(liveTempo);
-        logRtf(`buffer down to ${lead.toFixed(2)}s: easing playback to ${liveTempo.toFixed(2)}x to stay continuous`);
+        pipelineLog(
+          `buffer down to ${lead.toFixed(2)}s: easing playback to ${liveTempo.toFixed(2)}x to stay continuous`
+        );
       }
     };
     const push = (file: string, final: boolean) => {
@@ -660,7 +516,7 @@ export function synthesizeThenPlayBackend(params: {
               const asked = clamp(wantedOf(wpm) / synthSpeed, TEMPO_MIN, TEMPO_MAX);
               liveTempo = Math.min(asked, ceiling());
               if (liveTempo < asked - 0.02) {
-                logRtf(
+                pipelineLog(
                   `rate change mid-stream: ${liveTempo.toFixed(2)}x, not ${asked.toFixed(2)}x: the engine feeds no faster`
                 );
               }
@@ -752,7 +608,8 @@ export function synthesizeThenPlayBackend(params: {
   return {
     name: params.name,
     canFreeze: process.platform !== "win32",
-    speak({ text, wpm, voice, volume, language }, onDone, onError) {
+    speak(req, onDone, onError) {
+      const { text, wpm, voice, volume, language } = req;
       let killed = false;
       let frozen = false;
       lastWpm = wpm;
@@ -782,7 +639,7 @@ export function synthesizeThenPlayBackend(params: {
           }
         }
         if (session) {
-          return speakStreaming(session, sessionSpeed, volume, onDone, onError, text.length);
+          return speakStreaming(session, sessionSpeed, volume, onDone, onError, req);
         }
       }
       let pre = prewarmed.get(k);
@@ -798,26 +655,34 @@ export function synthesizeThenPlayBackend(params: {
       const s = pre ?? synth(text, voice, synthSpeed, true, language);
 
       const startPlayback = (wav: string) => {
+        // Tempo reflects the rate as of NOW, not as of synthesis time.
+        const tempo = tempoCapable ? playbackTempo(wantedOf(lastWpm) / s.synthSpeed) : 1;
+        const startedAt = Date.now();
+        let failed = false;
         const finish = () => {
           liveSynthSpeed = undefined;
-          fs.unlink(wav, () => {});
+          // Played to the end: offered for keeping, and deleted only when
+          // nothing wanted it. Cut short or failed: deleted as before.
+          if (killed || failed || !report(req, [wav], tempo, s.synthSpeed, startedAt)) {
+            fs.unlink(wav, () => {});
+          }
           if (!killed) {
             onDone();
           }
         };
-        // Tempo reflects the rate as of NOW, not as of synthesis time.
-        const tempo = tempoCapable ? playbackTempo(wantedOf(lastWpm) / s.synthSpeed) : 1;
+        const fail = (e: Error) => {
+          failed = true;
+          if (!killed) {
+            onError(`audio playback failed: ${e.message}`);
+          }
+          finish();
+        };
         const persistent = getPersistentPlayer();
         if (persistent) {
           liveSynthSpeed = s.synthSpeed;
           const pb = persistent.play(wav, tempo, volume / 100);
           playing = pb;
-          pb.done.then(finish, (e: Error) => {
-            if (!killed) {
-              onError(`audio playback failed: ${e.message}`);
-            }
-            finish();
-          });
+          pb.done.then(finish, fail);
           return;
         }
         const proc = spawn(player!.cmd, player!.args(wav, volume, tempo), { stdio: "ignore", windowsHide: true });
@@ -826,11 +691,15 @@ export function synthesizeThenPlayBackend(params: {
           freeze: () => proc.kill("SIGSTOP"),
           unfreeze: () => proc.kill("SIGCONT"),
         };
-        proc.on("error", (e) => {
-          onError(`audio playback failed: ${e.message}`);
+        proc.on("error", fail);
+        proc.on("exit", (code) => {
+          // A player that could not play (a device that refused the file)
+          // exits with an error; what it did not play is not kept.
+          if (code !== 0 && code !== null) {
+            failed = true;
+          }
           finish();
         });
-        proc.on("exit", finish);
       };
 
       s.promise

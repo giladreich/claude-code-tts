@@ -32,7 +32,7 @@ import {
   qwen3VoicesDir,
 } from "../tts/qwen3";
 import { BACK, Back, inputWithBack, pickWithPreview } from "../ui/prompts";
-import { playWavFile } from "../tts/synthPlay";
+import { playWavFile } from "../tts/wavPlayers";
 import { normalizeReference, trimSilence } from "../tts/wav";
 
 /**

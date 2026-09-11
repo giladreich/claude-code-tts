@@ -35,6 +35,7 @@ function fixture() {
   file(path.join(storage, "player.log"), 5);
   file(path.join(storage, "bin", "claude-code-tts-player-v4"), 2);
   file(path.join(tmp, "claude-code-tts-abc.wav"), 3);
+  file(path.join(storage, "played", "p1.wav"), 2); // spoken audio kept for export
   file(path.join(tmp, "unrelated.wav"), 50); // not ours: ignored
   file(path.join(uv, "mlx-audio", "lib"), 400);
   file(path.join(storage, "uv", "bin", "uv"), 30); // the extension's private uv and what it installed
@@ -129,6 +130,10 @@ test("the scan finds every category, marks what is in use, and ignores other too
   assert.equal(voices.category, "voices");
   // Temp parts only count ours.
   assert.equal(by("temp").bytes, 3 * 1024);
+  // The audio kept for export is listed, removable, and never "in use".
+  assert.equal(by("played").bytes, 2 * 1024);
+  assert.equal(by("played").category, "temp");
+  assert.equal(by("played").inUse, false);
   // Tool venvs are advisory.
   assert.equal(by("uv:mlx-audio").removable, false);
   assert.match(by("uv:mlx-audio").hint, /uv tool uninstall mlx-audio/);

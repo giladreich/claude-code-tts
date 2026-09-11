@@ -44,6 +44,8 @@ function fakeEngine(durationMs = 80) {
         voice: req.voice,
         wpm: req.wpm,
         language: req.language,
+        group: req.group,
+        preview: req.preview,
         killed: false,
         frozen: false,
       };
@@ -657,4 +659,34 @@ test("catch-up starts only for a real backlog and moves the pace a step at a tim
   }
   assert.ok(Math.max(...rates) > 200, `a real backlog does speed up: ${rates.join(" ")}`);
   assert.equal(rates[rates.length - 1] < Math.max(...rates), true, "and eases back down as the queue drains");
+});
+
+test("an utterance carries the message it belongs to through coalescing, and an audition says it is one", async () => {
+  // The export offers "the last message", which is only possible if each
+  // utterance knows which message it came from, all the way to the engine.
+  const eng = fakeEngine(30);
+  const q = new SpeechQueue(
+    baseConfig,
+    () => {},
+    undefined,
+    () => eng
+  );
+  q.enqueue("First sentence of the answer.", 7);
+  q.enqueue("Bash: run tests.", 7);
+  q.enqueue("Read: file.", 8); // short: merges into the queued announcement, which keeps its message
+  await until(() => eng.events.length === 2, 2000);
+  assert.deepEqual(
+    eng.events.map((e) => [e.text, e.group]),
+    [
+      ["First sentence of the answer.", 7],
+      ["Bash: run tests. Read: file.", 7],
+    ]
+  );
+  await sleep(60);
+  q.preview("sample", "v2");
+  await until(() => eng.events.length === 3, 2000);
+  assert.equal(eng.events[2].preview, true, "an audition is marked, so it is never kept for export");
+  assert.equal(eng.events[2].group, undefined);
+  q.stop();
+  q.dispose();
 });

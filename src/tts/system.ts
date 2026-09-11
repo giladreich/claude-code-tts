@@ -1,6 +1,7 @@
-import { execFile, spawn } from "child_process";
+import { ChildProcess, execFile, spawn } from "child_process";
 import { hasCommand } from "../platform/platform";
-import { Backend, VoiceInfo, wrapProcess } from "./types";
+import { reportPlayed } from "./played";
+import { Backend, SpeakRequest, Speaker, VoiceInfo, wrapProcess } from "./types";
 
 /**
  * The OS-provided engines: `say` on macOS, espeak/speech-dispatcher on Linux,
@@ -87,27 +88,123 @@ export function listSystemVoices(): Promise<VoiceInfo[]> {
 // it is asked during activation and on every engine rebuild.
 const hasCmd = hasCommand;
 
+/** How a request is rendered again for an export: the same voice and rate, no volume. */
+type Render = (outWav: string) => Promise<void>;
+
+/**
+ * Speak through a child process and, once it has finished on its own, offer
+ * the utterance for keeping together with a way to render it again. These
+ * engines write no file while they speak, so the audio for an export is made
+ * later, in the background, by the same engine with the same voice and rate:
+ * the speaking path pays nothing for it.
+ */
+function speakAndReport(
+  child: ChildProcess,
+  name: string,
+  canFreeze: boolean,
+  req: SpeakRequest,
+  render: Render | undefined,
+  onDone: () => void,
+  onError: (msg: string) => void
+): Speaker {
+  const startedAt = Date.now();
+  let killed = false;
+  let exitCode: number | null = null;
+  // Registered before wrapProcess's own exit handler, so the code is known
+  // by the time onDone runs.
+  child.on("exit", (code) => (exitCode = code));
+  const speaker = wrapProcess(
+    child,
+    canFreeze,
+    name,
+    () => {
+      if (!killed && exitCode === 0 && render && !req.preview) {
+        reportPlayed({
+          text: req.text,
+          engine: name,
+          voice: req.voice,
+          wpm: req.wpm,
+          language: req.language,
+          group: req.group,
+          tempo: 1,
+          synthSpeed: 1,
+          startedAt,
+          endedAt: Date.now(),
+          render,
+        });
+      }
+      onDone();
+    },
+    onError
+  );
+  return {
+    ...speaker,
+    kill: () => {
+      killed = true;
+      speaker.kill();
+    },
+  };
+}
+
+/** Resolves when a rendering process exits cleanly; the last stderr line otherwise. */
+function rendered(child: ChildProcess, stdinText: string, name: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let stderr = "";
+    child.stderr?.on("data", (d) => (stderr = (stderr + String(d)).slice(-400)));
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        return resolve();
+      }
+      const reason = stderr.trim().split("\n").filter(Boolean).pop() ?? "";
+      reject(new Error(`${name} exited with ${code}${reason ? `: ${reason.slice(0, 200)}` : ""}`));
+    });
+    child.stdin?.end(stdinText);
+  });
+}
+
+// "[[...]]" is say's embedded-command syntax; transcript text must not be
+// able to inject e.g. [[rate 900]].
+const saySafe = (text: string): string => text.replace(/\[\[/g, "( (");
+
+/** The same utterance `say` spoke, written as a 16-bit WAV. */
+function renderDarwin(req: SpeakRequest, out: string): Promise<void> {
+  // prettier-ignore
+  const args = [
+    "-o", out, "--file-format=WAVE", "--data-format=LEI16@22050",
+    "-r", String(req.wpm), ...(req.voice ? ["-v", req.voice] : []),
+  ];
+  const child = spawn("say", args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+  return rendered(child, saySafe(req.text), "say");
+}
+
 function darwinBackend(): Backend {
   return {
     name: "say",
     canFreeze: true,
-    speak({ text, wpm, voice, volume }, onDone, onError) {
+    speak(req, onDone, onError) {
+      const { wpm, voice, volume } = req;
       const args = ["-r", String(wpm)];
       if (voice) {
         args.push("-v", voice);
       }
-      // "[[...]]" is say's embedded-command syntax; transcript text must not
-      // be able to inject e.g. [[rate 900]].
-      text = text.replace(/\[\[/g, "( (");
+      let text = saySafe(req.text);
       if (volume < 100) {
         text = `[[volm ${(volume / 100).toFixed(2)}]] ${text}`;
       }
       // Text via stdin: no shell, no argv length limits.
       const child = spawn("say", args, { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
       child.stdin?.end(text);
-      return wrapProcess(child, true, "say", onDone, onError);
+      return speakAndReport(child, "say", true, req, (out) => renderDarwin(req, out), onDone, onError);
     },
   };
+}
+
+/** The same utterance espeak spoke, written as a WAV. */
+function renderEspeak(bin: string, req: SpeakRequest, out: string): Promise<void> {
+  const args = ["-s", String(req.wpm), "--stdin", "-w", out, ...(req.voice ? ["-v", req.voice] : [])];
+  const child = spawn(bin, args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+  return rendered(child, req.text, bin);
 }
 
 function linuxBackend(): Backend | undefined {
@@ -116,7 +213,8 @@ function linuxBackend(): Backend | undefined {
     return {
       name: bin,
       canFreeze: true,
-      speak({ text, wpm, voice, volume }, onDone, onError) {
+      speak(req, onDone, onError) {
+        const { text, wpm, voice, volume } = req;
         const args = ["-s", String(wpm), "--stdin"];
         if (voice) {
           args.push("-v", voice);
@@ -127,7 +225,7 @@ function linuxBackend(): Backend | undefined {
         }
         const child = spawn(bin, args, { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
         child.stdin?.end(text);
-        return wrapProcess(child, true, bin, onDone, onError);
+        return speakAndReport(child, bin, true, req, (out) => renderEspeak(bin, req, out), onDone, onError);
       },
     };
   }
@@ -159,18 +257,39 @@ function linuxBackend(): Backend | undefined {
   return undefined;
 }
 
+/** System.Speech rate is -10..10 around ~200 wpm. */
+const sapiRate = (wpm: number): number => Math.max(-10, Math.min(10, Math.round((wpm - 200) / 20)));
+
+const psQuote = (s: string): string => s.replace(/'/g, "''");
+
+/** The same utterance System.Speech spoke, written as a WAV. */
+function renderWindows(req: SpeakRequest, out: string): Promise<void> {
+  const voicePs = psQuote(req.voice);
+  const script =
+    "Add-Type -AssemblyName System.Speech; " +
+    "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
+    `$s.Rate = ${sapiRate(req.wpm)}; ` +
+    (voicePs ? `try { $s.SelectVoice('${voicePs}') } catch {}; ` : "") +
+    `$s.SetOutputToWaveFile('${psQuote(out)}'); ` +
+    "$s.Speak([Console]::In.ReadToEnd()); $s.Dispose()";
+  const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    stdio: ["pipe", "ignore", "pipe"],
+    windowsHide: true,
+  });
+  return rendered(child, req.text, "powershell");
+}
+
 function windowsBackend(): Backend {
   return {
     name: "powershell",
     canFreeze: false, // no SIGSTOP on win32
-    speak({ text, wpm, voice, volume }, onDone, onError) {
-      // System.Speech rate is -10..10 around ~200 wpm.
-      const rate = Math.max(-10, Math.min(10, Math.round((wpm - 200) / 20)));
-      const voicePs = voice.replace(/'/g, "''");
+    speak(req, onDone, onError) {
+      const { text, wpm, voice, volume } = req;
+      const voicePs = psQuote(voice);
       const script =
         "Add-Type -AssemblyName System.Speech; " +
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
-        `$s.Rate = ${rate}; ` +
+        `$s.Rate = ${sapiRate(wpm)}; ` +
         `$s.Volume = ${Math.max(0, Math.min(100, Math.round(volume)))}; ` +
         (voicePs ? `try { $s.SelectVoice('${voicePs}') } catch {}; ` : "") +
         "$s.Speak([Console]::In.ReadToEnd())";
@@ -179,7 +298,7 @@ function windowsBackend(): Backend {
         windowsHide: true,
       });
       child.stdin?.end(text);
-      return wrapProcess(child, false, "powershell", onDone, onError);
+      return speakAndReport(child, "powershell", false, req, (out) => renderWindows(req, out), onDone, onError);
     },
   };
 }

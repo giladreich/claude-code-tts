@@ -70,11 +70,12 @@ To go back to only hearing this window's folders, use **Menu**, **Voice and spee
 - **Speak text from Claude's chat panel**: select it and press the Speak Selection key. In a chat panel or terminal, copy it first; VSCode does not let extensions read a panel's selection, so the copy is the bridge.
 - **Switch voice while it talks**: pick another voice and the sentence restarts in it at once.
 - **Keep it out of the way**: `onlyWhenUnfocused` speaks only while VSCode is in the background, `ignoredTools` silences noisy tools, and `listenTo` decides whether sessions outside this window's folders are spoken too.
+- **Export what was said**: **Menu**, then **Export spoken audio**, writes the last message, or any part of what was played, as an MP3 or another file, the way it was heard: the voice, the rate and, if you listen in another language, the translation. The sheet shows the size the file will be as you choose the quality and the range, and each sentence can be heard and left out. The last 30 minutes of speech are kept for it (`export.keepMinutes`).
 - **Completion sounds**: **Menu**, then **Completion sounds**, installs Claude Code hooks so a sound plays when Claude finishes or needs you, even with VSCode closed. Each event gets its own sound, chosen by ear.
 
 ## What to install yourself
 
-`ffmpeg` is the only thing worth installing yourself, apart from `espeak-ng` on Linux. `ffmpeg` brings Linux and Windows close to macOS: microphone cloning, importing formats the OS cannot decode, and speed and volume control during playback. Without `espeak-ng` the built-in system voice on Linux has nothing to speak with, and **Check Setup** reports the engine as missing with no button to fix it.
+`ffmpeg` is the only thing worth installing yourself, apart from `espeak-ng` on Linux. `ffmpeg` brings Linux and Windows close to macOS: microphone cloning, importing formats the OS cannot decode, and speed and volume control during playback. On every platform it is what exports spoken audio as MP3, Opus or FLAC at the pace it played; without it an export is WAV (and M4A on macOS) at the pace the voice produced. Without `espeak-ng` the built-in system voice on Linux has nothing to speak with, and **Check Setup** reports the engine as missing with no button to fix it.
 
 ```bash
 brew install ffmpeg            # macOS

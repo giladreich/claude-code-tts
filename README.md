@@ -17,6 +17,7 @@ Everything runs on your machine. No cloud speech, no telemetry, no accounts, no 
 - **Your own voice.** Record ten seconds, use a file you already have, or describe the voice you want and have it made.
 - **23 languages** in a voice you create, and translation of everything into the one you prefer.
 - **Prose only.** Code blocks, tables and URLs are never read out; tool calls become short announcements.
+- **Export what you heard.** The last message, or any part of what was played, as an MP3 or another file, in the voice and language you listened in.
 
 ## How it works
 
@@ -120,6 +121,7 @@ The rest are in the status bar menu; all but the last are in the command palette
 | Menu | Mute, pause, and the five doors below. Shows the current engine, voice and speed. |
 | Stop Speaking | Silence now, stay enabled for future output. |
 | Recent Messages | Pick any of the last 20 messages to hear again. |
+| Export Spoken Audio to a File | The last message, or any part of what was played, as an MP3 or another file, the way it was heard. |
 | Select Voice | Browse the current engine's voices, with a preview on every highlight. |
 | Set Speech Rate | Pick a speaking rate, auditioned before you commit. |
 | Choose Voice Engine | Pick an engine, and install it from the same place if it is missing. |

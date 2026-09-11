@@ -32,7 +32,7 @@ import {
   resolveChatterboxRuntime,
 } from "../tts/chatterbox";
 import { listQwen3Clones, qwen3Available, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
-import { audioSupport } from "../tts/synthPlay";
+import { audioSupport } from "../tts/wavPlayers";
 import { getPersistentPlayer } from "../tts/audio";
 import { MenuOutcome, pickWithBack } from "../ui/prompts";
 import { findUv, installPrivateUv, runUv, toolInstallArgs, UV_VERSION, UvInfo } from "../platform/uvBootstrap";

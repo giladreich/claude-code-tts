@@ -218,7 +218,7 @@ Streaming needs both a tempo-capable player and the persistent one, so today it 
 | Text | `src/speech/format.ts` | Markdown to speech text (code, tables, URLs, images dropped; list items and headings end as sentences; identifiers split into words), tool announcements, lossless chunking with a fast-start clause split |
 | Queue | `src/speech/speech.ts` | Sequential playback, coalescing, prewarm two ahead, catch-up rate per chunk, pause/resume, previews that re-queue the interrupted utterance |
 | Engine contract | `src/tts/types.ts` | `Backend` (speak, prewarm, setLiveRate, cancel) and `Speaker` (kill, freeze, unfreeze) |
-| Synth-then-play | `src/tts/synthPlay.ts` | Stream sessions, urgent vs background priority, prebuffer from the measured realtime factor, native speed vs time-stretch, temp-file hygiene |
+| Synth-then-play | `src/tts/synthPlay.ts`, `src/tts/wavPlayers.ts` | Stream sessions, urgent vs background priority, prebuffer from the measured realtime factor, native speed vs time-stretch, temp-file hygiene; the platform's WAV players and the tempo range they cover |
 | Engines | `src/tts/system.ts`, `piper.ts`, `kokoro.ts`, `qwen3.ts`, `chatterbox.ts` | OS voices; Piper CLI; Kokoro via sherpa-onnx; Qwen3 presets, clones and designed voices; Chatterbox cloned voices in 23 languages |
 | Daemon bridge | `src/tts/pyDaemon.ts` | Spawns a Python daemon, ready timeout, request/cancel protocol, stderr to a log file |
 | Player bridge | `src/tts/audio.ts` | Spawns and supervises the Swift player: stream ids, pause-aware watchdog, idle recycling, afplay fallback |
@@ -228,6 +228,7 @@ Streaming needs both a tempo-capable player and the persistent one, so today it 
 | Notifications | `src/setup/hooks.ts`, `src/setup/notifySetup.ts`, `assets/notify.js` | Claude Code hooks that play a system sound per event category |
 | Session | `src/session/tailer.ts`, `src/session/sessionOwnership.ts`, `src/session/control.ts` | Tails `~/.claude/projects`, decides which window speaks a session (the oldest live window with that folder open, else the oldest live window), and reads one-word commands from `~/.claude/claude-code-tts-control` |
 | Line to speech | `src/speech/speaking.ts`, `src/speech/utteranceFilter.ts`, `src/speech/spokenHistory.ts` | Clean, detect, translate, chunk and queue in order; ignored tools and tool-streak collapse; the last message and the 20 before it, for repeating |
+| Export | `src/tts/played.ts`, `src/export/playedAudio.ts`, `src/export/audioExport.ts`, `src/export/exportFlow.ts` | What was played, kept for a bounded number of minutes: the engines offer each finished utterance through the sink instead of deleting it, and the system voices are rendered again in the background; the timeline of a selection, size estimates, the played tempo re-applied with ffmpeg's atempo, encoding through ffmpeg (or afconvert for AAC); and the sheet that asks what, format, quality, range, sentences, speed and pauses |
 | Language | `src/language/language.ts`, `src/language/translate.ts`, `src/language/glossary.ts`, `src/language/translationSetup.ts` | Script and language detection, Argos Translate over a Python daemon (best effort: the original is spoken when a model is missing), the terms kept in the source language, and the guided install of the runtime and one model per direction |
 | Setup | `src/setup/setupFlows.ts`, `src/setup/diagnostics.ts`, `src/platform/uvBootstrap.ts` | Every guided install behind a modal that names the size, each through uv (the user's, or a private pinned copy under `<globalStorage>/uv`, SHA-256 verified), plus "Check Setup" |
 
@@ -312,6 +313,7 @@ Dev dependencies: TypeScript, Prettier, ESLint (with typescript-eslint, @stylist
   chatterbox-venv/                     Chatterbox PyTorch runtime (off Apple Silicon)
   uv/                                  the private uv, its Python, its tool venvs and cache
   player.log, kokoro-daemon.log, qwen3-daemon.log, qwen3-design.log, chatterbox-daemon.log, translate-daemon.log
+  played/p<id>.wav, played/index.json    spoken audio kept for export (export.keepMinutes, oldest out first)
   claude-code-tts-notify.js               hook script (version-stable path)
 ~/.claude/claude-code-tts-notify.json     per-category notification sounds
 ~/.claude/settings.json                hook entries (only ours are touched; backup kept)

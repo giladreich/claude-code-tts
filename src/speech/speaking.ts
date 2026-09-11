@@ -28,16 +28,48 @@ export function translating(): boolean {
 }
 
 /** Chunk a block for the current engine and queue the pieces in order. */
-export function enqueueChunked(text: string): void {
+export function enqueueChunked(text: string, group?: number): void {
   const { engine, qwen3Model } = config().speechConfig;
   for (const chunk of chunkForSpeech(text, chunkPlanFor(engine, qwen3Model), (runtime.speech?.pending ?? 0) === 0)) {
-    runtime.speech?.enqueue(chunk);
+    runtime.speech?.enqueue(chunk, group);
   }
 }
 
-export function speakLine(text: string): void {
+/**
+ * Which message an utterance belongs to, so that an export can offer "the
+ * last message" rather than a stretch of minutes. A message starts at each
+ * prompt a session receives, and everything spoken for that session until
+ * the next prompt is Claude's answer to it. Sessions are counted apart, so
+ * two answers arriving at once do not share one.
+ */
+let lastGroup = 0;
+const groupBySession = new Map<string, number>();
+
+/** A fresh message of its own: a repeated message, a spoken selection. */
+export function newSpeechGroup(): number {
+  return ++lastGroup;
+}
+
+/** The message a session is on; `startsNew` when its transcript just received a prompt. */
+export function speechGroupFor(session: string, startsNew: boolean): number {
+  if (startsNew || !groupBySession.has(session)) {
+    groupBySession.set(session, newSpeechGroup());
+  }
+  return groupBySession.get(session)!;
+}
+
+/**
+ * A transcript line that starts a turn: a prompt from the user. A tool
+ * result is written as a user line too, and so are meta lines; neither is
+ * something the user said.
+ */
+export function isPromptLine(line: string): boolean {
+  return line.includes('"type":"user"') && !line.includes('"tool_result"') && !line.includes('"isMeta":true');
+}
+
+export function speakLine(text: string, group?: number): void {
   if (!translating()) {
-    runtime.speech?.enqueue(text);
+    runtime.speech?.enqueue(text, group);
     return;
   }
   const target = config().speechConfig.speakLanguage;
@@ -56,16 +88,16 @@ export function speakLine(text: string): void {
       const scripts = countScripts(text);
       const from = detectLanguage(text) ?? (scripts.latin > 0 && scripts.latin === scripts.total ? "en" : undefined);
       if (!from || from === target || !runtime.translator?.available) {
-        enqueueChunked(text);
+        enqueueChunked(text, group);
         return;
       }
       const translated = await runtime.translator.translate(text, from, target);
       if (translated !== text) {
         runtime.output.appendLine(`[translated ${from} to ${target}] ${translated}`);
       }
-      enqueueChunked(translated);
+      enqueueChunked(translated, group);
     })
-    .catch(() => enqueueChunked(text));
+    .catch(() => enqueueChunked(text, group));
 }
 
 /** Speak a resolved selection, or explain why there is nothing to speak. */
@@ -80,17 +112,18 @@ export function speakTarget(target: SpeakTarget, emptyHint: string): void {
     vscode.window.setStatusBarMessage("Claude Code TTS: speaking the clipboard", 3000);
   }
   runtime.speech?.stop();
+  const group = newSpeechGroup();
   // Translating: the whole selection goes as one block (one translation, and
   // the chunking follows the translated sentences); otherwise chunk it here.
   if (translating()) {
-    speakLine(cleaned);
+    speakLine(cleaned, group);
     return;
   }
   for (const chunk of chunkForSpeech(
     cleaned,
     chunkPlanFor(config().speechConfig.engine, config().speechConfig.qwen3Model)
   )) {
-    speakLine(chunk);
+    speakLine(chunk, group);
   }
 }
 

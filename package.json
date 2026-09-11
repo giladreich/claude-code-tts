@@ -2,7 +2,7 @@
   "name": "claude-code-tts",
   "displayName": "Claude Code TTS",
   "description": "Speaks Claude Code's prose output and tool actions aloud (text-to-speech). Reads text, not code.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "giladreich",
   "license": "MIT",
   "icon": "assets/icon.png",
@@ -122,6 +122,11 @@
       {
         "command": "claudeCodeTts.history",
         "title": "Recent Messages",
+        "category": "Claude Code TTS"
+      },
+      {
+        "command": "claudeCodeTts.exportAudio",
+        "title": "Export Spoken Audio to a File",
         "category": "Claude Code TTS"
       },
       {
@@ -730,6 +735,21 @@
             "tags": [
               "advanced"
             ],
+            "scope": "machine-overridable"
+          }
+        }
+      },
+      {
+        "title": "Claude Code TTS: Export",
+        "order": 7,
+        "properties": {
+          "claudeCodeTts.export.keepMinutes": {
+            "type": "number",
+            "default": 30,
+            "minimum": 0,
+            "maximum": 240,
+            "markdownDescription": "Minutes of spoken audio kept on this machine so that \"Export Spoken Audio to a File\" can write what was just heard, the way it was heard. Oldest out first; about 3 MB per minute in the extension's storage, never anywhere else. `0` keeps nothing, and turns the export off.",
+            "order": 0,
             "scope": "machine-overridable"
           }
         }

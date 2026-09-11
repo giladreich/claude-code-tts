@@ -261,6 +261,7 @@ function createVscodeStub(opts = {}) {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     QuickPickItemKind: { Separator: -1, Default: 0 },
+    InputBoxValidationSeverity: { Info: 1, Warning: 2, Error: 3 },
     QuickInputButtons: { Back: { tooltip: "Back" } },
     ThemeIcon: class ThemeIcon {
       constructor(id) {

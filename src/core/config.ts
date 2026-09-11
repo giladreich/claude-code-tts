@@ -84,6 +84,7 @@ export const SETTING_KEYS = [
   "pauseScale",
   "idleUnloadMinutes",
   "voiceRates",
+  "export.keepMinutes",
 ];
 
 /**
@@ -120,6 +121,8 @@ export function readConfig() {
     onlyWhenUnfocused: c.get<boolean>("onlyWhenUnfocused", false),
     substitutions: c.get<Record<string, string>>("substitutions", {}),
     listenTo: c.get<string>("listenTo", "everywhere"),
+    /** Minutes of spoken audio kept on disk for "Export Spoken Audio to a File"; 0 keeps nothing. */
+    exportKeepMinutes: c.get<number>("export.keepMinutes", 30),
     notifications: {
       enabled: c.get<boolean>("notifications.enabled", true),
       volume: c.get<number>("notifications.volume", 70),

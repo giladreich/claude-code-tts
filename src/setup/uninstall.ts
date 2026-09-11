@@ -8,6 +8,7 @@
 import * as vscode from "vscode";
 import { SETTING_KEYS } from "../core/config";
 import { formatBytes, removeItems, scanStorage, ScanOptions, StorageItem } from "../platform/storage";
+import { playedAudio } from "../export/playedAudio";
 import { clearHistory } from "../speech/spokenHistory";
 import { listQwen3Clones } from "../tts/qwen3";
 import { cleanClaudeDirectory } from "./uninstallHook";
@@ -29,9 +30,10 @@ export async function clearAllSettings(): Promise<void> {
       }
     }
   }
-  // The spoken history is the one thing a reset leaves on disk otherwise,
-  // and the privacy document says a reset clears it.
+  // The spoken history and the audio kept for export are what a reset would
+  // otherwise leave behind, and the privacy document says a reset clears both.
   await clearHistory();
+  await playedAudio()?.clear();
 }
 
 export interface RemoveEverythingDeps {

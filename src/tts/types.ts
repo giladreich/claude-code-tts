@@ -111,6 +111,10 @@ export interface SpeakRequest {
   volume: number;
   /** Two-letter code of the language detected in this text, when known. */
   language?: string;
+  /** An audition from a picker, not something Claude said: never kept for export. */
+  preview?: boolean;
+  /** The message this belongs to (see speaking.ts), so an export can offer messages. */
+  group?: number;
 }
 
 /** One utterance in flight. */

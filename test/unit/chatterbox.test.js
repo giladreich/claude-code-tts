@@ -255,7 +255,7 @@ test(
   { skip: (!appleSilicon && "Apple Silicon only") || (!python && "no python with numpy") },
   async () => {
     const { chatterboxBackend } = require("../../out/tts/chatterbox.js");
-    const { setPipelineLogger } = require("../../out/tts/synthPlay.js");
+    const { setPipelineLogger } = require("../../out/tts/wavPlayers.js");
     const savedXdg = process.env.XDG_DATA_HOME;
     const savedPy = process.env.PYTHONPATH;
     const mark = path.join(tmpDir("cv-mark-"), "generate.jsonl");

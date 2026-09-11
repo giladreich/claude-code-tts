@@ -11,7 +11,8 @@ import * as os from "os";
 import * as path from "path";
 import { uvToolPython, uvToolsDir, venvPython } from "../platform/platform";
 import { PyTtsDaemon } from "./pyDaemon";
-import { StreamTask, SYNTH_SPEED_MAX, SYNTH_SPEED_MIN, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
+import { StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
+import { SYNTH_SPEED_MAX, SYNTH_SPEED_MIN } from "./wavPlayers";
 
 const clampSpeed = (v: number) => Math.min(SYNTH_SPEED_MAX, Math.max(SYNTH_SPEED_MIN, v));
 import { Backend } from "./types";

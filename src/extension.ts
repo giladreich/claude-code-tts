@@ -4,7 +4,10 @@ import * as vscode from "vscode";
 import { applySubstitutions, utterancesFromLine } from "./speech/format";
 import { filterUtterances } from "./speech/utteranceFilter";
 import { disposePersistentPlayer, initPersistentPlayer } from "./tts/audio";
-import { cleanupStaleTempFiles, setPipelineLogger } from "./tts/synthPlay";
+import { cleanupStaleTempFiles, setPipelineLogger } from "./tts/wavPlayers";
+import { setPlayedSink } from "./tts/played";
+import { initPlayedAudio } from "./export/playedAudio";
+import { exportAudioFlow } from "./export/exportFlow";
 import {
   demoSound,
   ensureHooksCurrent,
@@ -47,11 +50,14 @@ import {
   useNewProfile,
 } from "./voices/voiceOffers";
 import {
+  isPromptLine,
   lastTool,
+  newSpeechGroup,
   speakTarget,
   projectChanged,
   speakLine,
   speakSelectionOrClipboard,
+  speechGroupFor,
   toolNames,
   translating,
 } from "./speech/speaking";
@@ -466,6 +472,20 @@ export function activate(context: vscode.ExtensionContext): void {
     runtime.onError
   );
   cleanupStaleTempFiles();
+  // What was played is kept for a while, so it can be exported to a file the
+  // way it was heard. The engines offer each finished utterance; the setting
+  // is read live, so 0 stops the keeping at once.
+  const played = initPlayedAudio(path.join(context.globalStorageUri.fsPath, "played"), () => {
+    const minutes = config().exportKeepMinutes;
+    return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 0;
+  });
+  setPlayedSink((utterance) => played.retain(utterance));
+  context.subscriptions.push({
+    dispose: () => {
+      setPlayedSink(undefined);
+      played.flush();
+    },
+  });
   runtime.translator = newTranslator();
   context.subscriptions.push({ dispose: () => runtime.translator?.dispose() });
   if (config().speechConfig.speakLanguage) {
@@ -550,6 +570,11 @@ export function activate(context: vscode.ExtensionContext): void {
       ) {
         runtime.speech?.wake();
       }
+      // A prompt starts a new message: what is spoken for this session until
+      // the next one is Claude's answer to it, which is what an export
+      // offers as one item. Decided before the mute check, so a message that
+      // starts while muted still counts as one when speech resumes.
+      const group = speechGroupFor(file, isPromptLine(line));
       // Parse even while muted so tool-name correlation for errors stays warm.
       const utterances = utterancesFromLine(
         line,
@@ -600,13 +625,13 @@ export function activate(context: vscode.ExtensionContext): void {
       if (speakable.length > 0) {
         const { changed, previous } = projectChanged(project);
         if (changed && previous && !mine(project)) {
-          speakLine(`From ${projectLabel(project)}.`);
+          speakLine(`From ${projectLabel(project)}.`, group);
         }
       }
       for (const u of speakable) {
         const text = applySubstitutions(u.text, cfg.substitutions);
         runtime.output.appendLine(`[speak ${u.kind} @${runtime.speech!.currentRate()}wpm] ${text}`);
-        speakLine(text);
+        speakLine(text, group);
       }
       countSpoken(speakable.length);
       updateStatus();
@@ -679,6 +704,7 @@ export function activate(context: vscode.ExtensionContext): void {
       downloadVoiceForLanguage(code)
     ),
     vscode.commands.registerCommand("claudeCodeTts.history", showHistory),
+    vscode.commands.registerCommand("claudeCodeTts.exportAudio", (back?: boolean) => exportAudioFlow(back === true)),
     vscode.commands.registerCommand("claudeCodeTts.menu", showMenu),
     vscode.commands.registerCommand("claudeCodeTts.resetSettings", resetSettings),
     vscode.commands.registerCommand("claudeCodeTts.removeEverything", () =>
@@ -805,8 +831,9 @@ export function activate(context: vscode.ExtensionContext): void {
       // recorded is the prose as Claude wrote it, so repeating it has to
       // translate and chunk it again, or it comes back in the language you
       // asked not to hear.
+      const group = newSpeechGroup();
       for (const chunk of lastSpoken()) {
-        speakLine(chunk);
+        speakLine(chunk, group);
       }
     }),
     // One command for "say this": the editor selection when there is one,

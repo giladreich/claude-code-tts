@@ -94,18 +94,26 @@ const CATCH_UP_START_AT_ITEMS = 3;
  */
 const RATE_STEP = 0.04;
 
+/** A queued utterance and the message it came from. */
+interface QueueItem {
+  text: string;
+  /** The message (turn) it belongs to, so what was played can be exported per message. */
+  group?: number;
+}
+
 /**
  * Sequential text-to-speech queue. One utterance at a time; when the queue
  * falls behind (Claude produced more than is spoken), the rate ramps from
  * `rate` toward `maxRate` proportionally to the backlog.
  */
 export class SpeechQueue {
-  private queue: string[] = [];
+  private queue: QueueItem[] = [];
   private current: Speaker | undefined;
   /** The catch-up rate last spoken at, so the next one moves from it rather than jumping. */
   private lastEffectiveRate: number | undefined;
   /** Text of the utterance in `current`, so a preview can put it back. */
   private currentText = "";
+  private currentGroup: number | undefined;
   private previewSpeaker: Speaker | undefined;
   private previewActive = false;
   private previewDone: (() => void) | undefined;
@@ -267,7 +275,7 @@ export class SpeechQueue {
   /** Language of the message being spoken, kept across short utterances. */
   private languages = new LanguageTracker();
 
-  enqueue(text: string): void {
+  enqueue(text: string, group?: number): void {
     // Last line of defence for every path into the queue (translation,
     // selection, tests): an utterance with nothing to pronounce is dropped
     // rather than handed to an engine that crashes on it.
@@ -281,11 +289,11 @@ export class SpeechQueue {
     // Coalesce small backlogged utterances (bursts of tool announcements):
     // one synthesis + one playback instead of paying per-utterance overhead.
     const last = this.queue[this.queue.length - 1];
-    if (last !== undefined && last.length + text.length + 2 <= COALESCE_MAX) {
-      const sep = /[.!?]$/.test(last.trimEnd()) ? " " : ". ";
-      this.queue[this.queue.length - 1] = last + sep + text;
+    if (last !== undefined && last.text.length + text.length + 2 <= COALESCE_MAX) {
+      const sep = /[.!?]$/.test(last.text.trimEnd()) ? " " : ". ";
+      last.text = last.text + sep + text; // the merged utterance keeps the first one's message
     } else {
-      this.queue.push(text);
+      this.queue.push({ text, group });
     }
     this.pump();
     // A chunk arriving WHILE something plays must start synthesizing now,
@@ -386,9 +394,10 @@ export class SpeechQueue {
       // The interrupted utterance goes back to the front of the queue so
       // nothing Claude said is lost to an audition.
       const interrupted = this.currentText;
+      const group = this.currentGroup;
       this.killCurrent(); // killCurrent pumps, but previewActive gates it
       if (interrupted) {
-        this.queue.unshift(interrupted);
+        this.queue.unshift({ text: interrupted, group });
       }
     }
 
@@ -397,6 +406,7 @@ export class SpeechQueue {
       wpm: rate ?? this.config.rate,
       voice,
       volume: this.config.volume,
+      preview: true,
     };
     const speaker: Speaker = backend.speak(
       req,
@@ -451,13 +461,15 @@ export class SpeechQueue {
       return;
     }
     const text = this.currentText;
+    const group = this.currentGroup;
     const speaker = this.current;
     this.current = undefined; // cleared first so its onDone becomes a no-op
     this.currentText = "";
+    this.currentGroup = undefined;
     speaker.kill();
     this.backend?.cancel?.();
     if (text) {
-      this.queue.unshift(text);
+      this.queue.unshift({ text, group });
     }
     this.pump();
     this.onStateChange?.(this.current !== undefined);
@@ -630,7 +642,7 @@ export class SpeechQueue {
     if (this.rateChosen || !dynamicRate || maxRate <= rate) {
       return rate;
     }
-    const backlogChars = this.queue.reduce((n, t) => n + t.length, 0);
+    const backlogChars = this.queue.reduce((n, t) => n + t.text.length, 0);
     const ramp = (have: number, start: number, full: number) => Math.max(0, have - start) / (full - start);
     const factor = Math.min(
       1,
@@ -672,13 +684,14 @@ export class SpeechQueue {
     if (this.current || this.previewActive || this.paused || !this.backend) {
       return;
     }
-    const text = this.queue.shift();
-    if (text === undefined) {
+    const item = this.queue.shift();
+    if (item === undefined) {
       // Nothing left to catch up on: a later burst may speed up again.
       this.rateChosen = false;
       this.lastEffectiveRate = undefined;
       return;
     }
+    const text = item.text;
 
     // Rate reflects what is still waiting behind this utterance.
     const language = this.config.autoLanguage ? this.languages.update(text) : undefined;
@@ -703,6 +716,7 @@ export class SpeechQueue {
       voice: chosen.engine === this.config.engine || backend !== this.backend ? chosen.voice : this.config.voice,
       volume: this.config.volume,
       language,
+      group: item.group,
     };
     const speaker: Speaker = backend.speak(
       req,
@@ -713,6 +727,7 @@ export class SpeechQueue {
         }
         this.current = undefined;
         this.currentText = "";
+        this.currentGroup = undefined;
         this.pump();
         this.onStateChange?.(this.current !== undefined);
       },
@@ -720,6 +735,7 @@ export class SpeechQueue {
     );
     this.current = speaker;
     this.currentText = text;
+    this.currentGroup = item.group;
     this.onStateChange?.(true);
 
     // Engines with synthesis latency start on the next chunks right away.
@@ -754,12 +770,12 @@ export class SpeechQueue {
       // synthesis. On an engine that cannot abort a running generation each
       // one costs seconds, so the tail waits until it can no longer grow.
       // queue[0] is always prepared: it plays next.
-      if (i > 0 && i === this.queue.length - 1 && next.length + 3 <= COALESCE_MAX) {
+      if (i > 0 && i === this.queue.length - 1 && next.text.length + 3 <= COALESCE_MAX) {
         return;
       }
-      const plan = this.planFor(next);
+      const plan = this.planFor(next.text);
       plan.backend?.prewarm?.({
-        text: next,
+        text: next.text,
         wpm: this.effectiveRate(),
         voice: plan.voice,
         volume: this.config.volume,

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { config } from "../core/config";
 import { runtime } from "../core/runtime";
 import { SpeechConfig } from "../speech/speech";
-import { playWavFile } from "../tts/synthPlay";
+import { playWavFile } from "../tts/wavPlayers";
 
 /**
  * A quick pick that auditions what is highlighted.
@@ -139,6 +139,11 @@ export function inputWithBack(
     placeHolder?: string;
     password?: boolean;
     validateInput?: (value: string) => string | undefined;
+    /**
+     * What the value means, shown under the box while it is valid: the
+     * length and size an export range comes to, updated as it is typed.
+     */
+    hint?: (value: string) => string | undefined;
   },
   back = false
 ): Promise<string | Back | undefined> {
@@ -161,9 +166,19 @@ export function inputWithBack(
       box.buttons = [vscode.QuickInputButtons.Back];
     }
     let answer: string | Back | undefined;
-    box.onDidChangeValue((value) => {
-      box.validationMessage = opts.validateInput?.(value) ?? "";
-    });
+    const advise = (value: string) => {
+      const problem = opts.validateInput?.(value);
+      if (problem) {
+        box.validationMessage = problem;
+        return;
+      }
+      const hint = opts.hint?.(value);
+      box.validationMessage = hint ? { message: hint, severity: vscode.InputBoxValidationSeverity.Info } : "";
+    };
+    box.onDidChangeValue(advise);
+    if (opts.hint) {
+      advise(box.value);
+    }
     box.onDidTriggerButton((button) => {
       if (button === vscode.QuickInputButtons.Back) {
         answer = BACK;
@@ -196,6 +211,9 @@ export function pickManyWithBack<T extends vscode.QuickPickItem>(opts: {
   placeholder: string;
   title?: string;
   back?: boolean;
+  /** Play the highlighted row (the sentences of an export); returns how to stop it. */
+  preview?: (item: T) => { stop: () => void } | undefined;
+  debounceMs?: number;
 }): Promise<T[] | "back" | undefined> {
   return new Promise((resolve) => {
     const qp = vscode.window.createQuickPick<T>();
@@ -209,6 +227,27 @@ export function pickManyWithBack<T extends vscode.QuickPickItem>(opts: {
       qp.buttons = [vscode.QuickInputButtons.Back];
     }
     qp.selectedItems = opts.items.filter((i) => (i as vscode.QuickPickItem & { picked?: boolean }).picked);
+    let playing: { stop: () => void } | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    const shownAt = Date.now();
+    const stop = () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      timer = undefined;
+      playing?.stop();
+      playing = undefined;
+    };
+    if (opts.preview) {
+      qp.onDidChangeActive((active) => {
+        const item = active[0];
+        if (!item || isInitialActivation(qp, active, shownAt)) {
+          return;
+        }
+        stop();
+        timer = setTimeout(() => (playing = opts.preview!(item)), opts.debounceMs ?? 250);
+      });
+    }
     let answer: T[] | "back" | undefined;
     qp.onDidTriggerButton((button) => {
       if (button === vscode.QuickInputButtons.Back) {
@@ -221,6 +260,7 @@ export function pickManyWithBack<T extends vscode.QuickPickItem>(opts: {
       qp.hide();
     });
     qp.onDidHide(() => {
+      stop();
       qp.dispose();
       resolve(answer ?? (opts.back ? "back" : undefined));
     });

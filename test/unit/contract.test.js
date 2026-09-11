@@ -245,7 +245,9 @@ test("the command palette shows one entry per job, not one per code path", () =>
     (pkg.contributes.menus?.commandPalette ?? []).filter((m) => m.when === "false").map((m) => m.command)
   );
   const visible = declared.filter((c) => !hidden.has(c));
-  assert.ok(visible.length <= 15, `${visible.length} commands in the palette`);
+  // Sixteen: fifteen, plus exporting spoken audio, which is a job of its own
+  // and one a person will type into the palette rather than hunt for.
+  assert.ok(visible.length <= 16, `${visible.length} commands in the palette`);
   for (const must of [
     "claudeCodeTts.menu",
     "claudeCodeTts.toggle",

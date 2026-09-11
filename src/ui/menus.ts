@@ -16,7 +16,8 @@ import { config, RATE_MAX, RATE_MIN, saveVoiceRate } from "../core/config";
 import { DEFAULT_KEEP_IN_SOURCE } from "../language/glossary";
 import { languageName } from "../language/language";
 import { runtime } from "../core/runtime";
-import { speakLine } from "../speech/speaking";
+import { playedAudio } from "../export/playedAudio";
+import { newSpeechGroup, speakLine } from "../speech/speaking";
 import { spokenMessages } from "../speech/spokenHistory";
 import { lastSpoken } from "../speech/spokenHistory";
 import { testCompletionSound } from "./sounds";
@@ -77,6 +78,16 @@ export async function showMenuOnce(): Promise<MenuOutcome> {
     { label: "$(clippy) Speak selection or clipboard", command: "claudeCodeTts.speak", closeAfter: true },
     ...(spokenMessages().length > 0
       ? [{ label: "$(history) Recent messages...", command: "claudeCodeTts.history", closeAfter: true, args: [true] }]
+      : []),
+    ...(playedAudio()?.has()
+      ? [
+          {
+            label: "$(export) Export spoken audio...",
+            detail: "The last message, or any part of what was played, as an MP3 or another file",
+            command: "claudeCodeTts.exportAudio",
+            args: [true],
+          },
+        ]
       : []),
     separator("Settings"),
     ...(config().speechConfig.engine === "system"
@@ -306,8 +317,9 @@ export async function showHistory(back = false): Promise<MenuOutcome> {
   runtime.speech?.stop();
   // Same path a live line takes, so an older message is repeated in the
   // language and voice you are listening in now.
+  const group = newSpeechGroup();
   for (const chunk of spokenMessages()[picked.index].chunks) {
-    speakLine(chunk);
+    speakLine(chunk, group);
   }
   return "ran";
 }

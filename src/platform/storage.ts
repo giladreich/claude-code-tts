@@ -366,6 +366,19 @@ export async function scanStorage(o: ScanOptions): Promise<StorageItem[]> {
     removable: true,
     hint: "Safe to remove",
   });
+  // What was played recently, kept so it can be exported to a file.
+  const played = path.join(o.storageDir, "played");
+  add({
+    id: "played",
+    label: "Spoken audio kept for export",
+    detail: 'The last minutes of speech, kept for "Export Spoken Audio to a File" (the export.keepMinutes setting)',
+    bytes: await dirSize(played),
+    paths: [played],
+    category: "temp",
+    inUse: false,
+    removable: true,
+    hint: "Replaced by newer speech on its own; safe to remove",
+  });
 
   // --- The private uv and everything it installed: owned by the extension,
   // one folder, removable as a whole. Re-running an engine's setup brings it

@@ -75,6 +75,12 @@ The advanced groups are engine internals. Nothing in the everyday groups depends
 | `idleUnloadMinutes` | `45` | Minutes without speech after which the Qwen3 or Chatterbox model is unloaded (0 keeps it resident). A loaded model holds 1.5-3 GB; the first sentence after an unload costs a measured 27 s for Chatterbox (16 s to load, 11 s to speak). **Set Up the Best Voice** lowers this to 10 on a machine with less than 16 GB and raises it to 90 at 32 GB or more, unless you have set it yourself. |
 
 
+### Export
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `export.keepMinutes` | `30` | Minutes of spoken audio kept in the extension's storage so that **Export Spoken Audio to a File** can write what was just heard, the way it was heard. Oldest out first, about 3 MB a minute, never anywhere else. `0` keeps nothing and turns the export off. |
+
 ## Commands
 
 Fifteen commands are listed in the palette; the others stay registered so that keybindings and scripts keep working, and are reached through the flow that owns them.
@@ -96,6 +102,7 @@ Fifteen commands are listed in the palette; the others stay registered so that k
 | `speakClipboard` | Speak Clipboard |
 | `pauseResume` | Pause or Resume |
 | `history` | Recent Messages |
+| `exportAudio` | Export Spoken Audio to a File |
 | `menu` | Menu |
 | `resetSettings` | Reset Settings to Defaults |
 | `removeEverything` | Remove Everything Claude Code TTS Added |
@@ -162,6 +169,24 @@ is only ever read: nothing is written back, nothing is executed, and a line
 that is not one of these is ignored. A line left in the file is not obeyed
 again when a window starts.
 
+## Exporting spoken audio
+
+**Export Spoken Audio to a File** (the palette, or **Menu** once something has been spoken) writes what was just heard: the last message, or any part of what was played recently, as a file. The audio is the audio that played: translated if you listen in another language, in the voice and at the rate it was spoken, so the file is what you heard rather than a new reading of the text. The system voices speak without writing a file, so their sentences are rendered again in the background right after they are spoken, with the same voice and rate.
+
+The first row of the sheet exports with what is set; the defaults are a good MP3 of the whole selection at the pace it played, with the pauses between sentences kept short. Every other row changes one thing and shows the size the file will be:
+
+| Choice | Default | What it does |
+|---|---|---|
+| What | The last message | Everything kept, or any message, newest first; each row plays its first sentence as you move over it |
+| Format | MP3 | M4A (AAC), Opus, FLAC or WAV. WAV needs nothing installed; M4A uses the built-in encoder on macOS; the rest need `ffmpeg` |
+| Quality | Good, 96 kbit/s | Small (48), Good (96) or Best (160) for MP3; 32, 64 and 96 for M4A; 24, 32 and 48 for Opus. Each row shows the size it comes to for this selection |
+| Range | All of it | A start and end time like `0:10-1:30`; the length and size update as it is typed |
+| Sentences | All | Untick sentences to leave them out; moving over one plays it |
+| Speed | As played | The tempo the player applied, including the speed-up while catching up on a backlog, or the voice's own pace. Either needs `ffmpeg`; without it the audio is exported exactly as the voice produced it |
+| Pauses | Natural, up to 0.6 s | The pauses between sentences as they were heard, shortened: a wait for synthesis or for Claude's next paragraph was silence at the time. Tight (0.15 s) or as heard (up to 4 s) |
+
+The file is named after the date and time and offered in your Downloads folder; the folder you choose and the choices you make are remembered for the next export. `export.keepMinutes` says how much is kept: 30 minutes of speech by default, about 3 MB a minute, in the extension's own storage. Sentences you skipped are not kept, auditions from the voice pickers are not, and nothing is kept at all when it is `0`. "Storage and Cleanup" lists what is there, and **Reset Settings to Defaults** empties it.
+
 ## Sizes and speeds
 
 | What | Size | Speed |
@@ -221,6 +246,7 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 | Pause mid-word | yes | yes | no (finishes the utterance, then holds) |
 | Clone from the microphone | yes | yes, with `ffmpeg` (PulseAudio or ALSA) | yes, with `ffmpeg` (you pick the input device) |
 | Clone from an audio or video file | yes | yes, with `ffmpeg` installed | yes, with `ffmpeg` installed |
+| Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg` | WAV; the rest with `ffmpeg` |
 | Design a voice from a description | yes | yes | yes |
 | Completion sounds (hooks) | yes, per-event sound choice | yes, per-event choice from the desktop sound themes | yes, per-event choice from `C:\Windows\Media` |
 

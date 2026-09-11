@@ -8,7 +8,8 @@ import { execFile, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { exe, userScriptDirs, uvToolsDirs, venvBin } from "../platform/platform";
-import { SYNTH_SPEED_MAX, SYNTH_SPEED_MIN, synthesizeThenPlayBackend } from "./synthPlay";
+import { synthesizeThenPlayBackend } from "./synthPlay";
+import { SYNTH_SPEED_MAX, SYNTH_SPEED_MIN } from "./wavPlayers";
 import { Backend } from "./types";
 
 // ---------------------------- executable lookup ----------------------------

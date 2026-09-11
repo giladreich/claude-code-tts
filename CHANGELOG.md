@@ -5,6 +5,11 @@ changed for you. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0]
+
+- Export what was spoken to a file: the last message, or any part of what was played, as an MP3 (or M4A, Opus, FLAC, WAV), in the voice, at the rate and in the language it was heard. The sheet shows the size the file will be as the quality and the range are chosen, each sentence can be heard and left out, and the pauses between sentences are kept natural. The last 30 minutes of speech are kept for it (`export.keepMinutes`; 0 keeps nothing).
+- The menu rows "Set speech rate" and "Show spoken log", and a few other prompts, had lost words to the rename and read "runtime.speech"; they read as intended again.
+
 ## [1.0.1]
 
 - The store page shows the two diagrams as pictures. The Marketplace has no mermaid renderer, so both arrived as a wall of `flowchart LR` text where a diagram was meant to be.
