@@ -96,6 +96,10 @@ const PARTIAL_ACTIVE_MS = 120_000;
 
 /** Where the Python runtimes keep their cache. */
 export function hubDir(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
+  // The hub cache can be moved on its own (HF_HUB_CACHE) or with the whole home.
+  if (env.HF_HUB_CACHE) {
+    return env.HF_HUB_CACHE;
+  }
   return env.HF_HOME ? path.join(env.HF_HOME, "hub") : path.join(home, ".cache", "huggingface", "hub");
 }
 

@@ -50,7 +50,7 @@ grep -rnE "https?://|fetch\(|XMLHttpRequest|socket\." src assets --include="*.ts
 | You click a "how to install" link | Opens `github.com/OHF-Voice/piper1-gpl` in your browser | Only if you click | Yes |
 | Claude Code is not installed and you click the offer to read about it | Opens `claude.com/claude-code` in your browser | Only if you click | Yes |
 
-That is the complete list. Everything else, including all synthesis, cloning, transcription and playback, is local computation.
+That is the complete list. Everything else, including all synthesis, cloning, transcription and playback, is local computation. The downloads the extension makes itself go through the proxy VSCode is configured for (its `http.proxy` setting) or the one in `HTTPS_PROXY`, so a proxy sees them the way it sees any other download; the Python runtimes honour the same variables.
 
 ## About Claude Code itself
 
@@ -102,4 +102,4 @@ recreates it.
 
 - **Run it offline.** Once the engine and voices are downloaded, disconnect the network: speech, cloning from a file, and voice design (with the model cached) all keep working. Only new downloads fail.
 - **Watch the process.** A network monitor (Little Snitch, `lsof -i`, `nettop`) shows the extension host making no connections while speaking.
-- **Read the code.** `src/tts/net.ts` is the only HTTP client, and it is imported by exactly three files: `src/setup/kokoroSetup.ts` and `src/setup/piperSetup.ts` (both behind an explicit user action with a consent dialog that states the size), and `src/platform/uvBootstrap.ts`, which downloads a pinned release of `uv` and refuses to unpack it unless it matches the SHA-256 that project publishes.
+- **Read the code.** `src/tts/net.ts` is the only HTTP client, and it is imported by exactly four files: `src/setup/kokoroSetup.ts` and `src/setup/piperSetup.ts` (both behind an explicit user action with a consent dialog that states the size), `src/platform/uvBootstrap.ts`, which downloads a pinned release of `uv` and refuses to unpack it unless it matches the SHA-256 that project publishes, and `src/extension.ts`, which only hands it VSCode's `http.proxy` setting at activation and downloads nothing.

@@ -4,10 +4,10 @@
  * what `pip install piper-tts` ships. Both flag dialects are supported below.
  */
 
-import { execFile, spawnSync } from "child_process";
+import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { exe, userScriptDirs, uvToolsDirs, venvBin } from "../platform/platform";
+import { commandOnPath, exe, userScriptDirs, uvToolsDirs, venvBin } from "../platform/platform";
 import { synthesizeThenPlayBackend } from "./synthPlay";
 import { SYNTH_SPEED_MAX, SYNTH_SPEED_MIN } from "./wavPlayers";
 import { Backend } from "./types";
@@ -20,9 +20,15 @@ import { Backend } from "./types";
  * pip/uv put it in ~/.local/bin which is often missing from VSCode's PATH.
  */
 export function resolvePiperPath(configured: string): string | undefined {
+  // Found on disk rather than run: this is asked when the engine is built,
+  // which is activation for a Piper user, and starting Piper to ask it for
+  // --help cost a Python start-up there (and a console window on Windows).
   const runnable = (p: string): boolean => {
+    if (!path.isAbsolute(p) && !p.includes(path.sep)) {
+      return commandOnPath(p) !== undefined;
+    }
     try {
-      return spawnSync(p, ["--help"], { stdio: "ignore", timeout: 5000 }).error === undefined;
+      return fs.statSync(p).isFile();
     } catch {
       return false;
     }
@@ -207,7 +213,7 @@ export function piperBackend(
   // background (a synchronous probe here stalled activation for piper users).
   let lengthFlag = "--length-scale";
   try {
-    execFile(piperPath, ["--help"], { encoding: "utf8", timeout: 5000 }, (_err, stdout) => {
+    execFile(piperPath, ["--help"], { encoding: "utf8", timeout: 5000, windowsHide: true }, (_err, stdout) => {
       const help = String(stdout ?? "");
       if (help && !help.includes("--length-scale") && help.includes("--length_scale")) {
         lengthFlag = "--length_scale";

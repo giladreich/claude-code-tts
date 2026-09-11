@@ -42,6 +42,12 @@ interface FileState {
 const HOT_WINDOW_MS = 120_000;
 const POLL_INTERVAL_MS = 150;
 /**
+ * Without a recursive watch (Linux before Node 20, or a machine out of
+ * inotify watches), the tree is walked this often for new files and for
+ * files that grew after going quiet. A walk is one stat per transcript.
+ */
+const RESCAN_INTERVAL_MS = 2000;
+/**
  * How deep under the root transcripts are looked for. A project's own
  * transcripts sit one level down; a subagent's are nested by kind and run id,
  * and a workflow's one deeper still. Six leaves room for the next layer,
@@ -62,6 +68,7 @@ const NEW_FILE_MAX = 256 * 1024;
 export class TranscriptTailer {
   private watcher: fs.FSWatcher | undefined;
   private pollTimer: NodeJS.Timeout | undefined;
+  private rescanTimer: NodeJS.Timeout | undefined;
   private files = new Map<string, FileState>();
   private reading = new Set<string>();
   private dirty = new Set<string>();
@@ -90,14 +97,7 @@ export class TranscriptTailer {
         /* file vanished between list and stat */
       }
     }
-    // FSEvents-backed recursive watch on macOS; catches brand-new files too.
-    this.watcher = fs.watch(this.root, { recursive: true }, (_event, filename) => {
-      if (!filename || !filename.toString().endsWith(".jsonl")) {
-        return;
-      }
-      this.readAppended(path.join(this.root, filename.toString()));
-    });
-    this.watcher.on("error", (err) => this.onError(`watch failed: ${err.message}`));
+    this.watch();
     // Low-latency path: watch events can lag by seconds, so recently-active
     // files are also polled. A no-growth poll is a single stat(), cheap.
     this.pollTimer = setInterval(() => {
@@ -110,6 +110,63 @@ export class TranscriptTailer {
     }, POLL_INTERVAL_MS);
   }
 
+  /**
+   * A recursive watch where the platform has one (FSEvents on macOS,
+   * ReadDirectoryChangesW on Windows, inotify per directory on Linux from
+   * Node 20): it is what notices a brand-new session file and a file that
+   * grows after going quiet. Where it cannot be had, Linux under the Node 18
+   * of older editors refuses the recursive option outright and a machine out
+   * of inotify watches fails later with ENOSPC, the tree is walked instead;
+   * without that, nothing said in a new session would ever have been spoken.
+   */
+  private watch(): void {
+    try {
+      this.watcher = fs.watch(this.root, { recursive: true }, (_event, filename) => {
+        if (!filename || !filename.toString().endsWith(".jsonl")) {
+          return;
+        }
+        this.readAppended(path.join(this.root, filename.toString()));
+      });
+    } catch (e) {
+      this.onError(
+        `watching the transcripts is not possible here (${(e as Error).message}); scanning for them instead`
+      );
+      this.rescanInstead();
+      return;
+    }
+    this.watcher.on("error", (err) => {
+      this.onError(`watch failed (${err.message}); scanning for transcripts instead`);
+      this.watcher?.close();
+      this.watcher = undefined;
+      this.rescanInstead();
+    });
+  }
+
+  private rescanInstead(): void {
+    if (this.rescanTimer) {
+      return;
+    }
+    this.rescanTimer = setInterval(() => this.rescan(), RESCAN_INTERVAL_MS);
+  }
+
+  /** New files are read from their start; known ones that grew are read from where they were left. */
+  private rescan(): void {
+    for (const file of this.listTranscripts()) {
+      const known = this.files.get(file);
+      if (!known) {
+        this.readAppended(file);
+        continue;
+      }
+      try {
+        if (fs.statSync(file).size !== known.offset) {
+          this.readAppended(file);
+        }
+      } catch {
+        /* vanished between list and stat */
+      }
+    }
+  }
+
   dispose(): void {
     this.watcher?.close();
     this.watcher = undefined;
@@ -117,6 +174,10 @@ export class TranscriptTailer {
       clearInterval(this.pollTimer);
     }
     this.pollTimer = undefined;
+    if (this.rescanTimer) {
+      clearInterval(this.rescanTimer);
+    }
+    this.rescanTimer = undefined;
     this.files.clear();
   }
 

@@ -50,6 +50,42 @@ export function parseWav(buf: Buffer): WavInfo | undefined {
   return undefined;
 }
 
+/**
+ * Put the sizes into the header of a WAV whose writer never got to: ffmpeg
+ * fills them in when it exits, and on Windows it cannot be asked to stop
+ * through a pipe, so a recording ended by killing it declares zero bytes of
+ * audio and every reader hears nothing. True when the header was changed.
+ */
+export function repairWavHeader(file: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, "r+");
+    const head = Buffer.alloc(8192);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    const size = fs.fstatSync(fd).size;
+    const info = parseWav(head.subarray(0, n));
+    if (!info) {
+      return false;
+    }
+    const actual = size - info.dataOffset;
+    if (actual <= 0 || info.declaredDataLength === actual) {
+      return false;
+    }
+    const sizes = Buffer.alloc(4);
+    sizes.writeUInt32LE(size - 8);
+    fs.writeSync(fd, sizes, 0, 4, 4);
+    sizes.writeUInt32LE(actual);
+    fs.writeSync(fd, sizes, 0, 4, info.dataOffset - 4);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      fs.closeSync(fd);
+    }
+  }
+}
+
 /** Duration in seconds from the file header (chunk-aware); undefined if unreadable. */
 export function wavFileSeconds(file: string): number | undefined {
   try {

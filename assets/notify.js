@@ -35,7 +35,7 @@ function removeSelfIfExtensionGone(cfg) {
 
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   try {
-    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8").replace(/^\uFEFF/, ""));
     const mine = (hook) => String(hook && hook.command).includes("claude-code-tts-notify.js");
     let changed = false;
     for (const event of Object.keys(settings.hooks || {})) {
@@ -62,7 +62,7 @@ function removeSelfIfExtensionGone(cfg) {
 function run(payload) {
   try {
     const cfg = JSON.parse(
-      fs.readFileSync(path.join(os.homedir(), ".claude", "claude-code-tts-notify.json"), "utf8")
+      fs.readFileSync(path.join(os.homedir(), ".claude", "claude-code-tts-notify.json"), "utf8").replace(/^\uFEFF/, "")
     );
     if (removeSelfIfExtensionGone(cfg)) return;
     if (!cfg.enabled) return;
@@ -126,17 +126,36 @@ function run(payload) {
               ],
               ext: [".oga", ".ogg", ".wav"],
             };
-    const fallbacks = {
-      darwin: { stop: "Glass", permission: "Funk", question: "Ping", waiting: "Purr", tool: "Pop", subagent: "Pop", prompt: "Tink" },
-      linux: {
-        stop: "complete", permission: "dialog-warning", question: "dialog-information", waiting: "dialog-information",
-        tool: "message", subagent: "message", prompt: "audio-volume-change",
-      },
-      win32: {
-        stop: "Windows Proceed", permission: "Windows Notify", question: "Windows Notify", waiting: "Windows Notify",
-        tool: "Windows Navigation Start", subagent: "Windows Print complete", prompt: "Windows Navigation Start",
-      },
-    }[process.platform] || {};
+    const fallbacks =
+      {
+        darwin: {
+          stop: "Glass",
+          permission: "Funk",
+          question: "Ping",
+          waiting: "Purr",
+          tool: "Pop",
+          subagent: "Pop",
+          prompt: "Tink",
+        },
+        linux: {
+          stop: "complete",
+          permission: "dialog-warning",
+          question: "dialog-information",
+          waiting: "dialog-information",
+          tool: "message",
+          subagent: "message",
+          prompt: "audio-volume-change",
+        },
+        win32: {
+          stop: "Windows Proceed",
+          permission: "Windows Notify",
+          question: "Windows Notify",
+          waiting: "Windows Notify",
+          tool: "Windows Navigation Start",
+          subagent: "Windows Print complete",
+          prompt: "Windows Navigation Start",
+        },
+      }[process.platform] || {};
     const resolve = (name) => {
       for (const candidate of [name, fallbacks[kind]]) {
         if (!candidate) continue;
@@ -157,8 +176,9 @@ function run(payload) {
     const has = (cmd) => {
       try {
         return (
-          require("child_process").spawnSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "ignore" })
-            .status === 0
+          require("child_process").spawnSync(process.platform === "win32" ? "where" : "which", [cmd], {
+            stdio: "ignore",
+          }).status === 0
         );
       } catch {
         return false;

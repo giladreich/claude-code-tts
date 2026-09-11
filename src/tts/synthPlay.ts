@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { pythonEnv } from "../platform/platform";
 import { getPersistentPlayer } from "./audio";
 import { reportPlayed } from "./played";
 import { Backend, killProcess, SpeakRequest } from "./types";
@@ -266,9 +267,13 @@ export function synthesizeThenPlayBackend(params: {
     const { cmd, args, stdinText } = params.buildSynth(text, synthWpm, voice, wav);
     // stderr is kept (last few hundred characters): "exited with 1" alone
     // told nobody that Piper had thrown on an unpronounceable input.
+    // Piper is a Python program reading its text from stdin: without UTF-8
+    // mode Windows decodes that text with the system code page. Harmless for
+    // the engines that are not Python.
     const proc = spawn(cmd, args, {
       stdio: [stdinText !== undefined ? "pipe" : "ignore", "ignore", "pipe"],
       windowsHide: true,
+      env: pythonEnv(),
     });
     let stderr = "";
     proc.stderr?.on("data", (d) => (stderr = (stderr + String(d)).slice(-400)));

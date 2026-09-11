@@ -61,8 +61,12 @@ export async function testCompletionSound(): Promise<void> {
       FIX
     );
     if (pick === FIX) {
-      installHooksNow(runtime.context, config().notifications);
-      vscode.window.showInformationMessage("Claude Code TTS: the hooks are back in ~/.claude/settings.json.");
+      try {
+        installHooksNow(runtime.context, config().notifications);
+        vscode.window.showInformationMessage("Claude Code TTS: the hooks are back in ~/.claude/settings.json.");
+      } catch (e) {
+        vscode.window.showErrorMessage(`Claude Code TTS: ${(e as Error).message}`);
+      }
     }
     return;
   }

@@ -212,7 +212,7 @@ test("windows sharing the directory see each other's audio, and a closed window'
   assert.deepEqual(names(a), ["a1", "b1", "a2"], "in the order they played, whichever window played them");
   assert.deepEqual(names(b), ["a1", "b1", "a2"]);
   assert.ok(
-    a.list().every((e) => /\/p(a|b)-\d+\.wav$/.test(e.file)),
+    a.list().every((e) => /^p(a|b)-\d+\.wav$/.test(path.basename(e.file))),
     "files are named after the window that wrote them"
   );
   // Window b closes: the next window to look adopts what it kept.

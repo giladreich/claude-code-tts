@@ -9,6 +9,12 @@ changed for you. The format follows
 
 - Export what was spoken to a file: the last message, or any part of what was played, as an MP3 (or M4A, Opus, FLAC, WAV), in the voice, at the rate and in the language it was heard. The sheet shows the size the file will be as the quality and the range are chosen, each sentence can be heard and left out, and the pauses between sentences are kept natural. The last 30 minutes of speech are kept for it (`export.keepMinutes`; 0 keeps nothing).
 - The menu rows "Set speech rate" and "Show spoken log", and a few other prompts, had lost words to the rename and read "runtime.speech"; they read as intended again.
+- Downloads (Kokoro, Piper voices, the private uv) go through the proxy VSCode is configured for (`http.proxy`), or the one in `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. On a machine that reaches the internet only through a proxy they failed with a connection error while the Python side worked.
+- On Linux under an editor whose Node cannot watch a directory tree (VSCode before 1.90), and on a machine out of inotify watches, transcripts are found by scanning instead. Before, a new session was never spoken there, and on the older editors the extension did not start at all.
+- Piper reads its text as UTF-8 on Windows; a sentence with an accent or another script in it was mispronounced from the system code page. The system voice's PowerShell reads its text the same way.
+- A `~/.claude/settings.json` that cannot be parsed (a byte order mark from an editor, a stray comma) is left alone rather than replaced by the completion-sound hooks, and the hook script reads a file with a byte order mark.
+- The install command offered for ffmpeg names the package manager on the machine (apt, dnf, pacman, zypper, Homebrew) rather than always apt, and on Windows says to restart VSCode afterwards, which a winget install needs before the program is found.
+- Piper is found on disk rather than by running it, which no longer stalls activation for a Python start-up; probes and archive tools no longer flash a console window on Windows; and a microphone recording stopped early on Windows is complete rather than empty (ffmpeg there cannot be asked to stop through a pipe, so it is stopped the hard way and its header repaired).
 
 ## [1.0.1]
 

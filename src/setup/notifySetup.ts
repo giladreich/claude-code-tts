@@ -107,8 +107,8 @@ function hookInterpreter(): string {
 export function ensureHooksCurrent(context: vscode.ExtensionContext, cfg: NotifyConfig): void {
   const settings = loadClaudeSettings();
   const script = notifyScriptPath(context);
-  // None of ours in this file
-  if (!settingsHaveScript(settings, script)) {
+  // None of ours in this file, or a file we must not rewrite
+  if (settings === undefined || !settingsHaveScript(settings, script)) {
     return;
   }
   const before = JSON.stringify(settings);
@@ -149,13 +149,31 @@ export function syncNotifyRuntime(
   }
 }
 
+/**
+ * The user's Claude Code settings: an empty object when the file does not
+ * exist, undefined when it exists but is not JSON we can read. The
+ * difference matters: a file that failed to parse (a byte order mark from an
+ * editor on Windows, a comma too many) used to come back as {}, and the next
+ * save then replaced everything the user had in it with our hooks alone.
+ */
 function loadClaudeSettings(): any {
+  let text: string;
   try {
-    return JSON.parse(fs.readFileSync(CLAUDE_SETTINGS, "utf8"));
+    text = fs.readFileSync(CLAUDE_SETTINGS, "utf8");
   } catch {
     return {};
   }
+  try {
+    const parsed = JSON.parse(text.replace(/^\uFEFF/, ""));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
+
+/** The one reason a settings write is refused, for the person to fix. */
+const UNREADABLE =
+  "~/.claude/settings.json is not valid JSON, so it is left untouched; fix it and enable the sounds again";
 
 function saveClaudeSettings(settings: any): void {
   // One-time backup before our first ever write.
@@ -168,7 +186,8 @@ function saveClaudeSettings(settings: any): void {
 }
 
 export function hooksInstalled(context: vscode.ExtensionContext): boolean {
-  return settingsHaveScript(loadClaudeSettings(), notifyScriptPath(context));
+  const settings = loadClaudeSettings();
+  return settings !== undefined && settingsHaveScript(settings, notifyScriptPath(context));
 }
 
 /**
@@ -180,9 +199,11 @@ export function hooksInstalled(context: vscode.ExtensionContext): boolean {
  * finds the extension gone).
  */
 export function installHooksNow(context: vscode.ExtensionContext, cfg: NotifyConfig): void {
-  saveClaudeSettings(
-    applyHookNormalize(loadClaudeSettings(), notifyScriptPath(context), hookPlan(cfg), hookInterpreter())
-  );
+  const settings = loadClaudeSettings();
+  if (settings === undefined) {
+    throw new Error(UNREADABLE);
+  }
+  saveClaudeSettings(applyHookNormalize(settings, notifyScriptPath(context), hookPlan(cfg), hookInterpreter()));
 }
 
 export async function installHooks(context: vscode.ExtensionContext, cfg: NotifyConfig): Promise<boolean> {
@@ -194,12 +215,20 @@ export async function installHooks(context: vscode.ExtensionContext, cfg: Notify
   if (consent !== "Install hooks") {
     return false;
   }
-  installHooksNow(context, cfg);
+  try {
+    installHooksNow(context, cfg);
+  } catch (e) {
+    vscode.window.showErrorMessage(`Claude Code TTS: ${(e as Error).message}`);
+    return false;
+  }
   return true;
 }
 
 export function removeHooks(context: vscode.ExtensionContext): void {
-  saveClaudeSettings(applyHookRemove(loadClaudeSettings(), notifyScriptPath(context)));
+  const settings = loadClaudeSettings();
+  if (settings !== undefined) {
+    saveClaudeSettings(applyHookRemove(settings, notifyScriptPath(context)));
+  }
   // The sound choices exist for the hooks; without them the file is litter.
   fs.rmSync(NOTIFY_CONFIG, { force: true });
 }

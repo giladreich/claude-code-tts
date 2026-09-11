@@ -79,8 +79,8 @@ To go back to only hearing this window's folders, use **Menu**, **Voice and spee
 
 ```bash
 brew install ffmpeg            # macOS
-sudo apt install ffmpeg        # Debian, Ubuntu
-winget install Gyan.FFmpeg     # Windows
+sudo apt install ffmpeg        # Debian, Ubuntu (the extension offers dnf, pacman or zypper where those are the package manager)
+winget install Gyan.FFmpeg     # Windows, then restart VSCode
 ```
 
 ## Uninstalling

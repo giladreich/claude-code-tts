@@ -25,7 +25,7 @@ export function backupsAvailable(): boolean {
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: 120_000 }, (err, _o, stderr) =>
+    execFile(cmd, args, { timeout: 120_000, windowsHide: true }, (err, _o, stderr) =>
       err
         ? reject(
             new Error(

@@ -164,6 +164,46 @@ export function installCommand(pkg: string): string {
   return hasCommand("uv") ? `uv tool install ${pkg}` : `pipx install ${pkg}`;
 }
 
+/**
+ * How a system package (ffmpeg, espeak-ng) is installed on this machine.
+ *
+ * Linux is not one distribution: "sudo apt install" typed into a Fedora or
+ * Arch terminal is a dead end, so the package manager on PATH decides. The
+ * Windows package ids differ from the package names.
+ */
+export function packageInstallCommand(pkg: string): string {
+  if (isMac) {
+    return `brew install ${pkg}`;
+  }
+  if (isWindows) {
+    const ids: Record<string, string> = { ffmpeg: "Gyan.FFmpeg" };
+    return `winget install ${ids[pkg] ?? pkg}`;
+  }
+  if (hasCommand("apt")) {
+    return `sudo apt install ${pkg}`;
+  }
+  if (hasCommand("dnf")) {
+    return `sudo dnf install ${pkg}`;
+  }
+  if (hasCommand("pacman")) {
+    return `sudo pacman -S ${pkg}`;
+  }
+  if (hasCommand("zypper")) {
+    return `sudo zypper install ${pkg}`;
+  }
+  if (hasCommand("brew")) {
+    return `brew install ${pkg}`;
+  }
+  return `sudo apt install ${pkg}`;
+}
+
+/**
+ * Said after offering an install on Windows: a program installed with winget
+ * lands on the PATH of new processes only, and the editor's own environment
+ * was read when it started.
+ */
+export const AFTER_INSTALL_HINT = isWindows ? " Restart VSCode afterwards, so it finds the new program." : "";
+
 /** Quote a path for a shell command line only when it needs it. */
 // A path as a shell writes it. cmd.exe has no backslash escape, and quoting
 // one there would put the escapes into the path itself, so on Windows the

@@ -69,3 +69,23 @@ test("the uninstall hook is declared, ships, and imports nothing from vscode", (
   const ignore = fs.readFileSync(path.join(root, ".vscodeignore"), "utf8");
   assert.doesNotMatch(ignore, /^out\b/m, "out/ ships in the .vsix");
 });
+
+test("a settings file with a byte order mark is read, and its hooks are removed like any other", () => {
+  // An editor on Windows can leave a byte order mark in front of the JSON;
+  // JSON.parse refuses it, and the uninstall used to leave the hooks behind.
+  const os = require("os");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cv-bom-"));
+  const claude = path.join(home, ".claude");
+  fs.mkdirSync(claude, { recursive: true });
+  const ours = { type: "command", command: "node /x/claude-code-tts-notify.js stop" };
+  fs.writeFileSync(
+    path.join(claude, "settings.json"),
+    "﻿" + JSON.stringify({ model: "opus", hooks: { Stop: [{ hooks: [ours] }] } }, null, 2)
+  );
+  const removed = cleanClaudeDirectory(home);
+  assert.equal(removed.length, 1, removed.join("; "));
+  const settings = JSON.parse(fs.readFileSync(path.join(claude, "settings.json"), "utf8"));
+  assert.equal(settings.model, "opus");
+  assert.equal(settings.hooks, undefined);
+  fs.rmSync(home, { recursive: true, force: true });
+});

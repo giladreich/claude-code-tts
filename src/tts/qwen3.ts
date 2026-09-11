@@ -286,8 +286,11 @@ export function findQwen3MlxPython(): string | undefined {
     ["python3"].find((p) => {
       try {
         return (
-          spawnSync(p, ["-c", "import mlx_audio.tts.models.qwen3_tts"], { stdio: "ignore", timeout: 10000 }).status ===
-          0
+          spawnSync(p, ["-c", "import mlx_audio.tts.models.qwen3_tts"], {
+            stdio: "ignore",
+            timeout: 10000,
+            windowsHide: true,
+          }).status === 0
         );
       } catch {
         return false;
@@ -308,7 +311,9 @@ export function findQwen3Python(): string | undefined {
     fast ??
     ["python3", "python"].find((p) => {
       try {
-        return spawnSync(p, ["-c", "import qwen_tts"], { stdio: "ignore", timeout: 10000 }).status === 0;
+        return (
+          spawnSync(p, ["-c", "import qwen_tts"], { stdio: "ignore", timeout: 10000, windowsHide: true }).status === 0
+        );
       } catch {
         return false;
       }

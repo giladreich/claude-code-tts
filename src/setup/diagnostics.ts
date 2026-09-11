@@ -7,7 +7,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { exe, hasCommand, isMac, isWindows, userScriptDirs } from "../platform/platform";
+import { exe, hasCommand, isMac, isWindows, packageInstallCommand, userScriptDirs } from "../platform/platform";
 
 export type Status = "ok" | "partial" | "missing";
 
@@ -68,8 +68,7 @@ export interface DiagnosticsInput {
   translationPairs: string[];
 }
 
-const ffmpegInstall = (): string =>
-  isMac ? "brew install ffmpeg" : isWindows ? "winget install Gyan.FFmpeg" : "sudo apt install ffmpeg";
+const ffmpegInstall = (): string => packageInstallCommand("ffmpeg");
 
 /** Python tool installer command for a package, matching what is installed. */
 export function toolInstall(pkg: string): string {

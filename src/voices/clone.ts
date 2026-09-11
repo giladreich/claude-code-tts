@@ -14,12 +14,13 @@ import * as vscode from "vscode";
 import { findQwen3Python, listQwen3Clones, newProfileSlug, qwen3Available, qwen3VoicesDir } from "../tts/qwen3";
 import { chatterboxPython } from "../tts/chatterbox";
 import { hfModelSnapshot } from "../tts/qwen3";
-import { normalizeReference, trimSilence } from "../tts/wav";
+import { killProcess } from "../tts/types";
+import { normalizeReference, repairWavHeader, trimSilence } from "../tts/wav";
 import { languageName, profileLanguageNote } from "../language/language";
 import { BACK, inputWithBack, offerCommand, pickWithPreview } from "../ui/prompts";
 import { chatterboxReady } from "../tts/chatterbox";
 import { passageFor, PASSAGE_LANGUAGES } from "./passages";
-import { hasCommand, pythonEnv, uvToolPython } from "../platform/platform";
+import { AFTER_INSTALL_HINT, hasCommand, packageInstallCommand, pythonEnv, uvToolPython } from "../platform/platform";
 import { ensureCloneConsent } from "./consent";
 
 // Kept deliberately short: Qwen3-TTS clones from a few seconds of speech and
@@ -342,15 +343,29 @@ function recordWithFfmpeg(
   proc.stderr?.on("data", (d) => (stderr += String(d)));
   const finished = new Promise<{ ok: boolean; error: string }>((resolve) => {
     proc.on("error", (e) => resolve({ ok: false, error: e.message }));
-    proc.on("exit", () =>
+    proc.on("exit", () => {
+      // Stopped the hard way (see below): the header still says zero bytes.
+      repairWavHeader(outFile);
       resolve({
         ok: fs.existsSync(outFile) && fs.statSync(outFile).size > 1000,
         error: stderr.trim().split("\n").slice(-2).join(" ").slice(-300),
-      })
-    );
+      });
+    });
   });
-  // "q" asks ffmpeg to stop and finalise the file; killing it truncates.
-  return { finished, stop: () => proc.stdin?.write("q") };
+  // "q" asks ffmpeg to stop and finalise the file; killing it truncates. On
+  // Windows ffmpeg reads that key from the console and never from a pipe, so
+  // when the ask goes unanswered it is stopped the hard way after a moment,
+  // and the exit handler above repairs what that leaves.
+  const stop = () => {
+    proc.stdin?.write("q");
+    const fallback = setTimeout(() => {
+      if (proc.exitCode === null && !proc.killed) {
+        killProcess(proc);
+      }
+    }, 1500);
+    fallback.unref?.();
+  };
+  return { finished, stop };
 }
 
 function record(bin: string, outFile: string): Thenable<boolean> {
@@ -446,12 +461,8 @@ export async function cloneVoiceFlow(context: vscode.ExtensionContext): Promise<
     const pick = await offerCommand(
       process.platform === "darwin"
         ? "Claude Code TTS: recording needs Apple's CommandLineTools (one-time install) or ffmpeg."
-        : "Claude Code TTS: recording from the microphone needs ffmpeg. Install it, or clone from an audio or video file you already have.",
-      process.platform === "darwin"
-        ? "xcode-select --install"
-        : process.platform === "win32"
-          ? "winget install Gyan.FFmpeg"
-          : "sudo apt install ffmpeg",
+        : `Claude Code TTS: recording from the microphone needs ffmpeg. Install it, or clone from an audio or video file you already have.${AFTER_INSTALL_HINT}`,
+      process.platform === "darwin" ? "xcode-select --install" : packageInstallCommand("ffmpeg"),
       "Clone from a file instead"
     );
     if (pick) {

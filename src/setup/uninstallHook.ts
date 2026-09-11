@@ -32,7 +32,8 @@ export function cleanClaudeDirectory(home = os.homedir(), keepWindowRegistry = f
   const removed: string[] = [];
   const settingsFile = path.join(claude, "settings.json");
   try {
-    const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+    // An editor on Windows may have left a byte order mark in front of it.
+    const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8").replace(/^\uFEFF/, ""));
     if (settingsHaveScript(settings, NOTIFY_SCRIPT_NAME)) {
       fs.writeFileSync(settingsFile, JSON.stringify(applyHookRemove(settings, NOTIFY_SCRIPT_NAME), null, 2) + "\n");
       removed.push("the completion-sound hooks in ~/.claude/settings.json");

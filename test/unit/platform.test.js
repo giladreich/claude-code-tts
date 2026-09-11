@@ -291,3 +291,34 @@ test("the report says the same thing on every platform for the same machine", ()
     );
   }
 });
+
+test("the install command offered names this machine's package manager, and Windows is told to restart", () => {
+  // "sudo apt install" typed into a Fedora terminal is a dead end; the
+  // manager on PATH decides. Simulated per platform in a child, since the
+  // platform is read when platform.ts loads.
+  const platformJs = path.join(ROOT, "out", "platform", "platform.js").split(path.sep).join("/");
+  const ask = (platform, binNames) => {
+    const bin = tmpDir("cv-pkg-");
+    for (const name of binNames) {
+      fs.writeFileSync(path.join(bin, name), "");
+    }
+    const program = `
+      Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });
+      process.env.PATH = ${JSON.stringify(bin)};
+      process.env.PATHEXT = "";
+      const { packageInstallCommand, AFTER_INSTALL_HINT } = require(${JSON.stringify(platformJs)});
+      console.log(JSON.stringify([packageInstallCommand("ffmpeg"), AFTER_INSTALL_HINT]));
+    `;
+    const r = spawnSync(process.execPath, ["-e", program], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout.trim());
+  };
+  assert.deepEqual(ask("linux", ["dnf"]), ["sudo dnf install ffmpeg", ""]);
+  assert.deepEqual(ask("linux", ["pacman"]), ["sudo pacman -S ffmpeg", ""]);
+  assert.deepEqual(ask("linux", ["apt", "dnf"]), ["sudo apt install ffmpeg", ""]);
+  assert.deepEqual(ask("linux", []), ["sudo apt install ffmpeg", ""]);
+  assert.deepEqual(ask("darwin", []), ["brew install ffmpeg", ""]);
+  const [win, hint] = ask("win32", []);
+  assert.equal(win, "winget install Gyan.FFmpeg");
+  assert.match(hint, /Restart VSCode/);
+});

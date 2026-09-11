@@ -16,7 +16,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { config } from "../core/config";
 import { runtime } from "../core/runtime";
-import { isMac, isWindows } from "../platform/platform";
+import { AFTER_INSTALL_HINT, isMac, isWindows, packageInstallCommand } from "../platform/platform";
 import { playSample } from "../voices/design";
 import {
   BACK,
@@ -76,8 +76,7 @@ const timeOfDay = (at: number): string => new Date(at).toLocaleTimeString([], { 
 
 const sentences = (n: number): string => `${n} sentence${n === 1 ? "" : "s"}`;
 
-const ffmpegInstall = (): string =>
-  isMac ? "brew install ffmpeg" : isWindows ? "winget install Gyan.FFmpeg" : "sudo apt install ffmpeg";
+const ffmpegInstall = (): string => packageInstallCommand("ffmpeg");
 
 /** What was remembered from the last export, made valid for this machine. */
 function rememberedOptions(enc: Encoders): Options {
@@ -249,7 +248,7 @@ async function optionsSheet(
     }
     if (picked.missing) {
       await offerCommand(
-        `Claude Code TTS: ${FORMATS[picked.format].label} needs ${picked.missing}, which is not installed. Install it and the format is available at once.`,
+        `Claude Code TTS: ${FORMATS[picked.format].label} needs ${picked.missing}, which is not installed.${AFTER_INSTALL_HINT || " Install it and the format is available at once."}`,
         ffmpegInstall()
       );
       return "back";
@@ -359,7 +358,7 @@ async function optionsSheet(
     }
     if (!stretchable) {
       await offerCommand(
-        "Claude Code TTS: changing the pace of the audio needs ffmpeg, which is not installed. Without it the export is the audio exactly as the voice produced it.",
+        `Claude Code TTS: changing the pace of the audio needs ffmpeg, which is not installed. Without it the export is the audio exactly as the voice produced it.${AFTER_INSTALL_HINT}`,
         ffmpegInstall()
       );
       return "back";

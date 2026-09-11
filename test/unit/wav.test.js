@@ -176,3 +176,21 @@ test("normalizeReference removes DC offset and levels a quiet reference to about
   fs.writeFileSync(sil, buildWav(Buffer.alloc(n * 2), rate, 1, 16));
   assert.equal(normalizeReference(sil).gain, 1);
 });
+
+test("a WAV whose writer was killed gets the sizes its header never received", () => {
+  const { buildWav, parseWav, repairWavHeader } = require("../../out/tts/wav.js");
+  const fs = require("fs");
+  const path = require("path");
+  const { tmpDir } = require("../helpers");
+  const file = path.join(tmpDir(), "cut.wav");
+  const wav = buildWav(Buffer.alloc(24000 * 2), 24000, 1, 16); // one second
+  wav.writeUInt32LE(0, 4); // what ffmpeg leaves behind when it never reaches its trailer
+  wav.writeUInt32LE(0, 40);
+  fs.writeFileSync(file, wav);
+  assert.equal(parseWav(fs.readFileSync(file)).seconds, 0, "unreadable as written");
+  assert.equal(repairWavHeader(file), true);
+  assert.equal(parseWav(fs.readFileSync(file)).seconds, 1);
+  assert.equal(repairWavHeader(file), false, "a sound header is left alone");
+  fs.writeFileSync(file, "not a wav at all");
+  assert.equal(repairWavHeader(file), false);
+});

@@ -225,3 +225,41 @@ test("a scope that widens while the position is being moved does not swallow the
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("without a recursive watch, new sessions and quiet files that grow are still found", async () => {
+  // Linux under the Node 18 of older editors refuses the recursive option,
+  // and a machine out of inotify watches fails later: either way the tree is
+  // walked instead, or nothing said in a new session would ever be spoken.
+  const realWatch = fs.watch;
+  fs.watch = () => {
+    throw new Error("ERR_FEATURE_UNAVAILABLE_ON_PLATFORM");
+  };
+  const root = tmpDir("cv-tail-nowatch-");
+  const dir = path.join(root, "-proj");
+  fs.mkdirSync(dir);
+  const old = path.join(dir, "old.jsonl");
+  fs.writeFileSync(old, '{"old":1}\n');
+  const lines = [];
+  const errors = [];
+  const t = new TranscriptTailer(
+    (l) => lines.push(l),
+    (e) => errors.push(e),
+    () => true,
+    root
+  );
+  try {
+    t.start();
+    assert.equal(errors.length, 1, "said once, in the log");
+    assert.match(errors[0], /scanning/);
+    // A session that starts after activation: found by the walk, read from its start.
+    fs.writeFileSync(path.join(dir, "new.jsonl"), '{"a":1}\n');
+    await until(() => lines.includes('{"a":1}'), 6000);
+    // A file that went quiet (its last growth long ago) and grows again.
+    fs.appendFileSync(old, '{"b":2}\n');
+    await until(() => lines.includes('{"b":2}'), 6000);
+    assert.deepEqual(lines, ['{"a":1}', '{"b":2}']);
+  } finally {
+    t.dispose();
+    fs.watch = realWatch;
+  }
+});

@@ -13,7 +13,7 @@ import { qwen3VoicesDir } from "../tts/qwen3";
 import { extractWav, normalizeReference, parseWav, referenceWindows, trimSilence, wavFileSeconds } from "../tts/wav";
 import { playSample } from "./design";
 import { BACK, inputWithBack, offerCommand, pickWithPreview } from "../ui/prompts";
-import { hasCommand } from "../platform/platform";
+import { AFTER_INSTALL_HINT, hasCommand, packageInstallCommand } from "../platform/platform";
 import { ensureCloneConsent } from "./consent";
 import {
   ensureProfileEngine,
@@ -372,8 +372,8 @@ export async function cloneFromFileFlow(context: vscode.ExtensionContext, volume
   // Off macOS the decoding is ffmpeg's job; say so before a file is picked.
   if (process.platform !== "darwin" && !hasCommand("ffmpeg")) {
     await offerCommand(
-      "Claude Code TTS: reading audio and video files needs ffmpeg (a 24 kHz mono WAV works without it).",
-      process.platform === "win32" ? "winget install Gyan.FFmpeg" : "sudo apt install ffmpeg"
+      `Claude Code TTS: reading audio and video files needs ffmpeg (a 24 kHz mono WAV works without it).${AFTER_INSTALL_HINT}`,
+      packageInstallCommand("ffmpeg")
     );
     return undefined;
   }

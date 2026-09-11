@@ -42,6 +42,8 @@ export interface ScanOptions {
    * model. Callers pass defaultHfHome() and friends; the compiler now insists.
    */
   hfHome: string;
+  /** The hub cache itself, when HF_HUB_CACHE moves it away from `<hfHome>/hub`. */
+  hubDir?: string;
   extensionsDir: string;
   argosDir: string;
   /** Which Chatterbox runtime this machine resolves to, for the "in use" marks. */
@@ -239,7 +241,7 @@ export async function scanStorage(o: ScanOptions): Promise<StorageItem[]> {
   }
 
   // --- Hugging Face cache (Qwen3 and Whisper), written by the Python runtimes
-  const hub = hfHubDir(o.hfHome);
+  const hub = o.hubDir ?? hfHubDir(o.hfHome);
   const active = new Set(activeModelIds(o));
   for (const name of safeList(hub).filter((n) => n.startsWith("models--"))) {
     const id = modelIdOf(name);

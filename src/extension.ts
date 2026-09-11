@@ -6,6 +6,7 @@ import { filterUtterances } from "./speech/utteranceFilter";
 import { disposePersistentPlayer, initPersistentPlayer } from "./tts/audio";
 import { cleanupStaleTempFiles, setPipelineLogger } from "./tts/wavPlayers";
 import { setPlayedSink } from "./tts/played";
+import { setProxySetting } from "./tts/net";
 import { initPlayedAudio } from "./export/playedAudio";
 import { exportAudioFlow } from "./export/exportFlow";
 import {
@@ -385,6 +386,7 @@ function scanOptions(): ScanOptions {
     // Stated rather than defaulted inside the scanner: it lists what may be
     // deleted, so every directory it looks at is named by its caller.
     hfHome: defaultHfHome(),
+    hubDir: hubDir(),
     extensionsDir: defaultExtensionsDir(),
     argosDir: defaultArgosDir(),
     engine: c.engine,
@@ -478,6 +480,8 @@ export function activate(context: vscode.ExtensionContext): void {
     runtime.translator?.prewarm(config().speechConfig.speakLanguage);
   }
   setPipelineLogger((m) => runtime.output.appendLine(`[audio] ${m}`));
+  // Downloads go through the proxy the editor is configured for, when one is.
+  setProxySetting(() => vscode.workspace.getConfiguration("http").get<string>("proxy") || undefined);
   // Keep the hook script, hook entries, and config current across updates,
   // and install them the first time: completion sounds are on by default, and
   // they only work through Claude Code's own hooks. The script removes them

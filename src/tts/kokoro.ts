@@ -155,7 +155,9 @@ export function findKokoroPython(): string | undefined {
   const candidates = [venvPython(path.join(uvToolsDir(), "sherpa-onnx")), "python3", "python"];
   return candidates.find((p) => {
     try {
-      return spawnSync(p, ["-c", "import sherpa_onnx"], { stdio: "ignore", timeout: 15000 }).status === 0;
+      return (
+        spawnSync(p, ["-c", "import sherpa_onnx"], { stdio: "ignore", timeout: 15000, windowsHide: true }).status === 0
+      );
     } catch {
       return false;
     }
