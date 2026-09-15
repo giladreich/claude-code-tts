@@ -31,6 +31,7 @@ import {
   QWEN3_LANGUAGE_BY_CODE,
   qwen3VoicesDir,
 } from "../tts/qwen3";
+import { explainPlatformError } from "../platform/platform";
 import { BACK, Back, inputWithBack, pickWithPreview } from "../ui/prompts";
 import { playWavFile } from "../tts/wavPlayers";
 import { normalizeReference, trimSilence } from "../tts/wav";
@@ -411,7 +412,10 @@ export async function designVoiceFlow(
         return "cancelled";
       }
       vscode.window
-        .showErrorMessage(`Claude Code TTS: voice design failed: ${result.error ?? "unknown error"}`, "Show log")
+        .showErrorMessage(
+          `Claude Code TTS: voice design failed: ${explainPlatformError(result.error ?? "unknown error")}`,
+          "Show log"
+        )
         .then((p) => p && vscode.workspace.openTextDocument(logFile).then((d) => vscode.window.showTextDocument(d)));
       return undefined;
     }

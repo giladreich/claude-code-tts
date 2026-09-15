@@ -17,7 +17,7 @@ import {
   removeHooks,
   syncNotifyRuntime,
 } from "./setup/notifySetup";
-import { setExtraUvToolsDir } from "./platform/platform";
+import { explainPlatformError, setExtraUvToolsDir } from "./platform/platform";
 import { NUDGE_AFTER, shouldNudge } from "./setup/onboarding";
 import * as os from "os";
 import { clipboardTarget } from "./session/selection";
@@ -439,7 +439,8 @@ export function activate(context: vscode.ExtensionContext): void {
   setExtraUvToolsDir(privateUvToolsDir(context.globalStorageUri.fsPath));
   runtime.output = vscode.window.createOutputChannel("Claude Code TTS");
   background("settings migration", () => carryOldSettingsForward());
-  runtime.onError = (msg: string) => {
+  runtime.onError = (message: string) => {
+    const msg = explainPlatformError(message);
     runtime.output.appendLine(`[error] ${msg}`);
     if (msg.startsWith(TEXT_PREP_NEEDED)) {
       // The words being spoken are not the words that were written, and one

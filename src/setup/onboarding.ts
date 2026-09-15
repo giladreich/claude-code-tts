@@ -17,6 +17,21 @@ import { ENGINE_LANGUAGES, ProfileEngine } from "../language/language";
 
 export type RecommendedEngine = "qwen3" | "chatterbox" | "kokoro";
 
+/**
+ * What to tell someone whose Windows will not run the neural engines,
+ * before anything is downloaded. It states the fact and the alternative and
+ * stops there: an extension that tells people to switch a security feature
+ * off looks like the thing the feature exists to stop, and Microsoft warns
+ * the switch is one way.
+ */
+export function appControlNotice(state: "on" | "evaluation"): string {
+  const because =
+    state === "on"
+      ? "Windows Smart App Control is on."
+      : "Windows Smart App Control is still in its evaluation period, which blocks the same programs.";
+  return `${because} It blocks programs not signed by a known publisher, and every neural voice engine here is built from open-source components that are not, so none of them can run on this machine while it is on. The built-in Windows voice works as it is, and Claude Code TTS keeps using it. The setting is under Windows Security > App & browser control, and Microsoft warns it cannot be turned on again once it is off; on a work machine it is your administrator's.`;
+}
+
 /** What this computer can be asked to do, in the terms the choices need. */
 export interface Machine {
   platform: string;

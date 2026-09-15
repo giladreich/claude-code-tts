@@ -41,6 +41,8 @@ export interface DiagnosticsInput {
   pythonInstaller: boolean;
   /** tar, which is what exports and imports a voice pack. */
   backups: boolean;
+  /** Windows Smart App Control, which blocks the unsigned files the Python engines are made of. */
+  appControl?: "on" | "evaluation" | "off" | "unknown";
   engine: string;
   engineName: string;
   engineReady: boolean;
@@ -238,6 +240,19 @@ export function checkSetup(i: DiagnosticsInput): Capability[] {
     fix: i.hooksInstalled ? undefined : "turn completion sounds on",
     command: i.hooksInstalled ? undefined : "claudeCodeTts.toggleNotifications",
   });
+
+  if (i.appControl === "on" || i.appControl === "evaluation") {
+    // No fix is offered: the only one is a security setting, and that is
+    // the person's decision (or their administrator's), not this extension's.
+    out.push({
+      name: "Windows Smart App Control",
+      status: "partial",
+      detail:
+        i.appControl === "on"
+          ? "on: it blocks programs not signed by a known publisher, which the neural engines are built from. The built-in Windows voice keeps working"
+          : "in evaluation mode, which blocks the same unsigned components the neural engines are built from. The built-in Windows voice keeps working",
+    });
+  }
 
   out.push({
     name: "Voice backups",

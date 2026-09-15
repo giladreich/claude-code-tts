@@ -322,3 +322,48 @@ test("the install command offered names this machine's package manager, and Wind
   assert.equal(win, "winget install Gyan.FFmpeg");
   assert.match(hint, /Restart VSCode/);
 });
+
+test("Windows refusing an unsigned library is explained with the way out, and Check Setup warns while it would", () => {
+  const { explainPlatformError } = require("../../out/platform/platform.js");
+  const raw =
+    '[WinError 4551] An Application Control policy has blocked this file. Error loading "C:\\Users\\u\\AppData\\Roaming\\uv\\tools\\qwen-tts\\Lib\\site-packages\\torch\\lib\\shm.dll"';
+  const explained = explainPlatformError(raw);
+  assert.ok(explained.startsWith(raw), "the original error is kept");
+  assert.match(explained, /Smart App Control/);
+  assert.match(explained, /built-in Windows voice is signed by Microsoft/);
+  assert.equal(explainPlatformError("daemon exited with 1"), "daemon exited with 1", "other errors pass through");
+  const diagnosticsBase = () => ({
+    ffmpeg: true,
+    ffplay: true,
+    pythonInstaller: true,
+    backups: true,
+    engine: "qwen3",
+    engineName: "qwen3 (torch)",
+    engineReady: true,
+    kokoroReady: true,
+    kokoroDaemon: true,
+    qwen3Runtime: "torch",
+    piperAvailable: true,
+    persistentPlayer: false,
+    playerName: "ffplay",
+    playerTempo: true,
+    hooksInstalled: true,
+    voices: 1,
+    chatterboxRuntime: "torch",
+    chatterboxDiacritizer: true,
+    listenTo: "everywhere",
+    terminalOwner: true,
+    windows: 1,
+    speakLanguage: "",
+    translationReady: false,
+    translationPairs: [],
+  });
+  const rows = checkSetup({ ...diagnosticsBase(), appControl: "on" });
+  const row = rows.find((r) => r.name === "Windows Smart App Control");
+  assert.ok(row, "a warning row");
+  assert.equal(row.status, "partial");
+  assert.equal(
+    checkSetup({ ...diagnosticsBase(), appControl: "off" }).find((r) => r.name === "Windows Smart App Control"),
+    undefined
+  );
+});

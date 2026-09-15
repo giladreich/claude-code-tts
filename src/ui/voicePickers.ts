@@ -21,6 +21,7 @@ import {
   currentRecommendation,
   downloadVoiceFlow,
   ensurePiper,
+  neuralEnginesBlocked,
   offerChatterboxVoice,
   setupChatterboxFlow,
   setupKokoroFlow,
@@ -101,12 +102,16 @@ export async function selectEngine(back = false): Promise<MenuOutcome> {
         "Light neural voices for weak hardware, ~60 MB each. Needs the piper program and one downloaded voice file at a time.",
     },
   ];
+  // A Windows that will not run the neural engines says so on each of them,
+  // rather than after a download; the setup flows stop as well.
+  const blocked = neuralEnginesBlocked() ? "Not on this machine: Windows Smart App Control blocks it. " : "";
   const ordered = [...engines].sort((a, b) => Number(b.id === recommended) - Number(a.id === recommended));
   const picked = await pickWithBack(
     ordered.map((e) => ({
       ...e,
-      label: e.id === recommended ? `${e.label} (recommended)` : e.label,
+      label: e.id === recommended && !blocked ? `${e.label} (recommended)` : e.label,
       description: mark(e.id),
+      detail: e.id === "system" ? e.detail : `${blocked}${e.detail}`,
     })),
     { placeHolder: "Text-to-speech engine", title: `Engine (now: ${engineName()})`, matchOnDetail: true },
     back

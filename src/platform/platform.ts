@@ -198,6 +198,27 @@ export function packageInstallCommand(pkg: string): string {
 }
 
 /**
+ * What Windows means when it refuses to load a library the engines need.
+ *
+ * Smart App Control (Windows 11) and Application Control policies block
+ * program files that are not signed, and the PyTorch wheels the Qwen3 and
+ * Chatterbox engines are made of contain hundreds of unsigned ones, so the
+ * engine dies at import with "[WinError 4551] An Application Control policy
+ * has blocked this file". Nothing here can sign them; the choice is the
+ * user's, or their administrator's.
+ */
+export const WINDOWS_APP_CONTROL_HINT =
+  "Windows refused to load a program file that is not signed by a known publisher. That is Smart App Control (or, on a managed machine, an App Control for Business policy) doing its job: every neural voice engine here is built from open-source components that are not signed, so none of them can run while it is on. The built-in Windows voice is signed by Microsoft and keeps working. The setting itself is yours (Windows Security > App & browser control) or your administrator's; Microsoft warns that Smart App Control cannot be turned on again once turned off.";
+
+/** An engine's error, with the reason and the way out added where Windows caused it. */
+export function explainPlatformError(message: string): string {
+  if (/WinError 4551|Application Control policy/i.test(message)) {
+    return `${message} ${WINDOWS_APP_CONTROL_HINT}`;
+  }
+  return message;
+}
+
+/**
  * Said after offering an install on Windows: a program installed with winget
  * lands on the PATH of new processes only, and the editor's own environment
  * was read when it started.

@@ -186,3 +186,10 @@ test("the faster engine wins wherever it can say what is being spoken", () => {
     "no language named does not constrain the choice"
   );
 });
+
+test("the notice about Windows blocking the neural engines names what still works", () => {
+  const { appControlNotice } = require("../../out/setup/onboarding.js");
+  for (const state of ["on", "evaluation"]) {
+    assert.match(appControlNotice(state), /built-in Windows voice/);
+  }
+});

@@ -8,8 +8,10 @@
  * result. Nothing here shows a voice list: that is the picker's job, reached
  * through a command so this module needs to know nothing about it.
  */
+import { spawnSync } from "child_process";
 import * as vscode from "vscode";
 import { checkSetup, summarize } from "./diagnostics";
+import { appControlNotice } from "./onboarding";
 import { config } from "../core/config";
 import { languageName } from "../language/language";
 import { recommendEngine, recommendedSettings, shouldWriteDefault, thisMachine, wantedLanguages } from "./onboarding";
@@ -36,7 +38,7 @@ import { audioSupport } from "../tts/wavPlayers";
 import { getPersistentPlayer } from "../tts/audio";
 import { MenuOutcome, pickWithBack } from "../ui/prompts";
 import { findUv, installPrivateUv, runUv, toolInstallArgs, UV_VERSION, UvInfo } from "../platform/uvBootstrap";
-import { hasCommand, venvPython } from "../platform/platform";
+import { hasCommand, isWindows, venvPython } from "../platform/platform";
 
 /** Where a person is sent to install the Piper program themselves. */
 const PIPER_INSTALL_URL = "https://github.com/OHF-Voice/piper1-gpl";
@@ -82,7 +84,40 @@ export async function applyMachineDefaults(): Promise<void> {
  * a comparison table, installs it with the flow that already knows how, and
  * ends where the point of it is: a voice of their own.
  */
+/** Whether this Windows will run the neural engines at all; asked of the registry once per session. */
+let appControlState: "on" | "evaluation" | "off" | "unknown" | undefined;
+
+export function neuralEnginesBlocked(): "on" | "evaluation" | undefined {
+  appControlState ??= windowsAppControl();
+  return appControlState === "on" || appControlState === "evaluation" ? appControlState : undefined;
+}
+
+/**
+ * Said before any neural engine is installed on a Windows that will not run
+ * it: the fact, and that the built-in voice is what keeps working. Answers
+ * true when the install must not go ahead. Nothing here suggests changing
+ * the security setting; that is the person's or their administrator's call.
+ */
+async function stoppedByAppControl(): Promise<boolean> {
+  const state = neuralEnginesBlocked();
+  if (!state) {
+    return false;
+  }
+  const CHOOSE = "Choose a built-in voice";
+  const pick = await vscode.window.showInformationMessage(`Claude Code TTS: ${appControlNotice(state)}`, CHOOSE);
+  if (pick === CHOOSE) {
+    await vscode.workspace
+      .getConfiguration("claudeCodeTts")
+      .update("engine", "system", vscode.ConfigurationTarget.Global);
+    await vscode.commands.executeCommand("claudeCodeTts.selectVoice");
+  }
+  return true;
+}
+
 export async function setupBestVoiceFlow(): Promise<void> {
+  if (await stoppedByAppControl()) {
+    return;
+  }
   const recommended = currentRecommendation();
   const ready =
     recommended.engine === "qwen3"
@@ -200,6 +235,7 @@ export async function checkSetupFlow(back = false): Promise<MenuOutcome> {
     ffplay: hasCommand("ffplay"),
     pythonInstaller: hasCommand("uv") || hasCommand("pipx") || hasCommand("python3") || hasCommand("python"),
     backups: hasCommand("tar"),
+    appControl: windowsAppControl(),
     engine: cfg.engine,
     engineName: runtime.speech?.engineName ?? cfg.engine,
     engineReady: !isEngineLoading() && (runtime.speech?.hasEngine ?? false),
@@ -574,6 +610,9 @@ export async function installChatterboxRuntime(ask: boolean): Promise<boolean> {
  * (its watermarker imports pkg_resources, which newer setuptools dropped).
  */
 export async function setupChatterboxFlow(): Promise<boolean> {
+  if (await stoppedByAppControl()) {
+    return false;
+  }
   const storage = runtime.context.globalStorageUri.fsPath;
   const installed = resolveChatterboxRuntime(storage);
   if (installed) {
@@ -671,6 +710,9 @@ export async function ensureVoiceEngine(what: string): Promise<boolean> {
 
 /** Install Qwen3 if needed, switch to it, and warm the model. */
 export async function setupQwen3Flow(): Promise<boolean> {
+  if (await stoppedByAppControl()) {
+    return false;
+  }
   return setupQwen3({
     log: (line) => runtime.output.appendLine(`[qwen3 setup] ${line}`),
     showLog: () => runtime.output.show(),
@@ -699,6 +741,9 @@ export async function setupQwen3Flow(): Promise<boolean> {
 }
 
 export async function setupKokoroFlow(): Promise<void> {
+  if (await stoppedByAppControl()) {
+    return;
+  }
   if (!(await setupKokoro(runtime.context))) {
     return;
   }
@@ -706,4 +751,31 @@ export async function setupKokoroFlow(): Promise<void> {
     .getConfiguration("claudeCodeTts")
     .update("engine", "kokoro", vscode.ConfigurationTarget.Global);
   runtime.speech?.enqueue("Kokoro is ready. Claude will sound like this from now on.");
+}
+
+/**
+ * Whether Windows Smart App Control is on, off, or still deciding
+ * ("evaluation", which blocks the same files). Asked of the registry here,
+ * with the other questions Check Setup puts to the machine, and only on
+ * Windows: an engine install that will not load is worth a warning before
+ * its gigabytes are downloaded.
+ */
+export function windowsAppControl(): "on" | "evaluation" | "off" | "unknown" {
+  if (!isWindows) {
+    return "off";
+  }
+  try {
+    const r = spawnSync(
+      "reg",
+      ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy", "/v", "VerifiedAndReputablePolicyState"],
+      { encoding: "utf8", timeout: 5000, windowsHide: true }
+    );
+    const value = /VerifiedAndReputablePolicyState\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(r.stdout ?? "")?.[1];
+    if (value === undefined) {
+      return "unknown";
+    }
+    return { 0: "off" as const, 1: "on" as const, 2: "evaluation" as const }[parseInt(value, 16)] ?? "unknown";
+  } catch {
+    return "unknown";
+  }
 }
