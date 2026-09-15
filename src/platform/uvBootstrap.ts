@@ -166,7 +166,7 @@ function findFile(dir: string, name: string): string | undefined {
   return undefined;
 }
 
-export type Fetch = (url: string, dest: string, onBytes: (n: number) => void) => Promise<void>;
+export type Fetch = (url: string, dest: string, onBytes: (n: number, total?: number) => void) => Promise<void>;
 
 /**
  * Download the pinned uv release for this machine, verify it against the
@@ -177,7 +177,7 @@ export type Fetch = (url: string, dest: string, onBytes: (n: number) => void) =>
  */
 export async function installPrivateUv(
   storage: string,
-  onProgress: (message: string, bytes?: number) => void = () => {},
+  onProgress: (message: string, bytes?: number, total?: number) => void = () => {},
   fetch: Fetch = download
 ): Promise<string> {
   const asset = uvAsset();
@@ -197,7 +197,7 @@ export async function installPrivateUv(
       throw new Error("the published checksum could not be read");
     }
     onProgress("downloading uv");
-    await fetch(`${RELEASE_BASE}${asset.name}`, archive, (n) => onProgress("downloading uv", n));
+    await fetch(`${RELEASE_BASE}${asset.name}`, archive, (n, total) => onProgress("downloading uv", n, total));
     const actual = await sha256File(archive);
     if (actual !== expected) {
       throw new Error(`checksum mismatch for ${asset.name}: refusing to install it`);
@@ -250,6 +250,53 @@ export async function installPrivateUv(
  */
 export function toolInstallArgs(uv: UvInfo, pkg: string, extra: string[] = []): string[] {
   return ["tool", "install", ...(uv.private ? ["--python", "3.12"] : []), ...extra, pkg];
+}
+
+/** The size uv prints after a package name: "12.0MiB", "2.4GiB", "812KiB", "310B". */
+const UV_SIZE = /^([\d.]+)\s*(B|KiB|MiB|GiB)$/;
+const UV_UNITS: Record<string, number> = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3 };
+
+/**
+ * What uv says about the packages it fetches, read from its output: it
+ * announces each with its size ("Downloading torch (2.4GiB)") and again when
+ * it has all of it (" Downloaded torch"), and nothing in between, so what
+ * can be said is how much of what it has named so far is done, and which
+ * packages are still on their way.
+ */
+export class UvDownloads {
+  private announced = new Map<string, number>();
+  private finished = new Set<string>();
+
+  /** True when the line changed what there is to report. */
+  note(line: string): boolean {
+    const started = /^\s*Downloading (\S+) \((.+)\)\s*$/.exec(line);
+    if (started) {
+      const size = UV_SIZE.exec(started[2].trim());
+      this.announced.set(started[1], size ? Math.round(Number(size[1]) * UV_UNITS[size[2]]) : 0);
+      return true;
+    }
+    const done = /^\s*Downloaded (\S+)\s*$/.exec(line);
+    if (done && this.announced.has(done[1])) {
+      this.finished.add(done[1]);
+      return true;
+    }
+    return false;
+  }
+
+  summary(): { done: number; total: number; inFlight: { name: string; bytes: number }[] } {
+    let done = 0;
+    let total = 0;
+    const inFlight: { name: string; bytes: number }[] = [];
+    for (const [name, bytes] of this.announced) {
+      total += bytes;
+      if (this.finished.has(name)) {
+        done += bytes;
+      } else {
+        inFlight.push({ name, bytes });
+      }
+    }
+    return { done, total, inFlight };
+  }
 }
 
 /**

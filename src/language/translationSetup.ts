@@ -13,10 +13,14 @@ import { DEFAULT_KEEP_IN_SOURCE } from "./glossary";
 import { languageName } from "./language";
 import { runtime } from "../core/runtime";
 import { installTool } from "../setup/setupFlows";
+import { DownloadReport } from "../ui/downloads";
 import { translateDaemonScript, Translator, translationAvailable, translationModelMissing } from "./translate";
 
 /** The language Claude Code writes in, and so the one nothing is translated from. */
 export const SOURCE_LANGUAGE = "en";
+
+/** About what one direction's model weighs, until the server names it. */
+const TRANSLATION_MODEL_MB = 100;
 
 /** Download one direction's model with progress; false (and a message) if it failed. */
 export async function downloadTranslationModel(from: string, to: string): Promise<boolean> {
@@ -25,9 +29,13 @@ export async function downloadTranslationModel(from: string, to: string): Promis
       location: vscode.ProgressLocation.Notification,
       title: `Claude Code TTS: downloading the ${languageName(from)} to ${languageName(to)} model...`,
     },
-    async () => {
+    async (progress) => {
       try {
-        await runtime.translator!.install(from, to);
+        await runtime.translator!.install(
+          from,
+          to,
+          new DownloadReport(progress).file(TRANSLATION_MODEL_MB * 1024 * 1024)
+        );
         return true;
       } catch (e) {
         runtime.output.appendLine(`[translation] ${(e as Error).message}`);

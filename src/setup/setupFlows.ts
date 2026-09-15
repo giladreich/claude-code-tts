@@ -38,6 +38,7 @@ import {
 import { findQwen3Python, listQwen3Clones, qwen3Available, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
 import { audioSupport } from "../tts/wavPlayers";
 import { getPersistentPlayer } from "../tts/audio";
+import { DownloadReport, reportUvDownloads } from "../ui/downloads";
 import { MenuOutcome, pickWithBack } from "../ui/prompts";
 import { findUv, installPrivateUv, runUv, toolInstallArgs, UV_VERSION, UvInfo } from "../platform/uvBootstrap";
 import { nvidiaDriver, torchCudaOf, torchHasCuda, torchIndexArgs, torchIndexFor, venvOf } from "../platform/gpu";
@@ -337,7 +338,7 @@ export async function ensureUvWithConsent(purpose: string): Promise<UvInfo | und
     return existing;
   }
   const go = await vscode.window.showInformationMessage(
-    `${purpose} is a Python package. Claude Code TTS can install it without you running anything: it downloads its own copy of the uv tool (version ${UV_VERSION}, about 15 MB, verified against the checksum the uv project publishes) into its storage folder and installs the package and a Python there. Nothing outside that folder is touched, and "Storage and Cleanup" removes it all in one step.`,
+    `${purpose} is a Python package. Claude Code TTS can install it without you running anything: it downloads its own copy of the uv tool (version ${UV_VERSION}, about ${UV_MB} MB, verified against the checksum the uv project publishes) into its storage folder and installs the package and a Python there. Nothing outside that folder is touched, and "Storage and Cleanup" removes it all in one step.`,
     { modal: true },
     "Download uv and continue"
   );
@@ -351,13 +352,15 @@ export async function ensureUvWithConsent(purpose: string): Promise<UvInfo | und
       cancellable: false,
     },
     async (progress) => {
-      let got = 0;
+      const report = new DownloadReport(progress, "downloading uv");
+      const onBytes = report.file(UV_MB * 1024 * 1024);
       try {
-        await installPrivateUv(storage, (message, bytes) => {
+        await installPrivateUv(storage, (message, bytes, total) => {
           if (bytes) {
-            got += bytes;
+            onBytes(bytes, total);
+          } else {
+            report.message(message);
           }
-          progress.report({ message: bytes ? `${message} (${Math.round(got / 1024 / 1024)} MB)` : message });
         });
         runtime.output.appendLine(`[setup] uv ${UV_VERSION} installed privately under ${storage}`);
         return true;
@@ -407,6 +410,32 @@ async function torchIndexForThisMachine(torch26 = false): Promise<string[]> {
   return torchIndexArgs(index);
 }
 
+/** About what the uv archive weighs, until the server names it. */
+const UV_MB = 15;
+
+/**
+ * Run one uv command under a notification: every line to the log, and the
+ * packages it fetches shown with their sizes and how much of them is done.
+ */
+function runUvReporting(
+  uv: UvInfo,
+  args: string[],
+  tag: string,
+  progress: vscode.Progress<{ message?: string; increment?: number }>,
+  token: vscode.CancellationToken
+): Promise<{ ok: boolean; error?: string }> {
+  const show = reportUvDownloads(progress);
+  return runUv(
+    uv,
+    args,
+    (line) => {
+      runtime.output.appendLine(`[${tag}] ${line}`);
+      show(line);
+    },
+    { onCancel: (kill) => token.onCancellationRequested(kill) }
+  );
+}
+
 /** Install a Python tool through uv with progress and a log; false when it did not succeed. */
 export async function installTool(pkg: string, purpose: string, extra: string[] = []): Promise<boolean> {
   const uv = await ensureUvWithConsent(purpose);
@@ -420,15 +449,8 @@ export async function installTool(pkg: string, purpose: string, extra: string[] 
       cancellable: true,
     },
     async (progress, token) => {
-      const result = await runUv(
-        uv,
-        toolInstallArgs(uv, pkg, extra),
-        (line) => {
-          runtime.output.appendLine(`[install] ${line}`);
-          progress.report({ message: line.slice(0, 60) });
-        },
-        { onCancel: (kill) => token.onCancellationRequested(kill) }
-      );
+      progress.report({ message: "resolving packages..." });
+      const result = await runUvReporting(uv, toolInstallArgs(uv, pkg, extra), "install", progress, token);
       if (!result.ok && result.error !== "cancelled") {
         vscode.window
           .showErrorMessage(`Claude Code TTS: installing ${pkg} did not succeed (${result.error}).`, "Show log")
@@ -528,11 +550,9 @@ export async function ensureChatterboxText(subject?: string, asked = false): Pro
       title: "Claude Code TTS: adding text preparation",
       cancellable: true,
     },
-    async (_progress, token) => {
+    async (progress, token) => {
       for (const args of textPackageInstalls(python, missing)) {
-        const r = await runUv(uv, args, (line) => runtime.output.appendLine(`[chatterbox text] ${line}`), {
-          onCancel: (kill) => token.onCancellationRequested(kill),
-        });
+        const r = await runUvReporting(uv, args, "chatterbox text", progress, token);
         if (!r.ok) {
           return false;
         }
@@ -630,9 +650,7 @@ export async function installChatterboxRuntime(ask: boolean): Promise<boolean> {
       ];
       for (const [message, args] of steps) {
         progress.report({ message });
-        const r = await runUv(uv, args, (line) => runtime.output.appendLine(`[chatterbox] ${line}`), {
-          onCancel: (kill) => token.onCancellationRequested(kill),
-        });
+        const r = await runUvReporting(uv, args, "chatterbox", progress, token);
         if (!r.ok) {
           return false;
         }

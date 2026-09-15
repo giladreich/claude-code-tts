@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { tarArchiveArg, tarDirArg } from "../platform/platform";
 import { KOKORO_MODEL_ID, kokoroReady, SHERPA_VERSION, sherpaPlatform } from "../tts/kokoro";
 import { download } from "../tts/net";
+import { DownloadReport } from "../ui/downloads";
 
 const RUNTIME_MB = 25;
 const MODEL_MB = 335;
@@ -62,8 +63,6 @@ export async function setupKokoro(context: vscode.ExtensionContext): Promise<boo
   fs.mkdirSync(dir, { recursive: true });
   const runtimeUrl = `https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/sherpa-onnx-v${SHERPA_VERSION}-${plat}.tar.bz2`;
   const modelUrl = `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${KOKORO_MODEL_ID}.tar.bz2`;
-  const totalBytes = (RUNTIME_MB + MODEL_MB) * 1024 * 1024;
-
   try {
     await vscode.window.withProgress(
       {
@@ -72,18 +71,14 @@ export async function setupKokoro(context: vscode.ExtensionContext): Promise<boo
         cancellable: false,
       },
       async (progress) => {
-        let got = 0;
-        const onBytes = (n: number) => {
-          got += n;
-          progress.report({ increment: (n / totalBytes) * 100, message: `${Math.round(got / 1024 / 1024)} MB` });
-        };
-        for (const [url, name] of [
-          [runtimeUrl, "runtime.tar.bz2"],
-          [modelUrl, "model.tar.bz2"],
+        const report = new DownloadReport(progress);
+        for (const [url, name, mb] of [
+          [runtimeUrl, "runtime.tar.bz2", RUNTIME_MB],
+          [modelUrl, "model.tar.bz2", MODEL_MB],
         ] as const) {
           const archive = path.join(dir, name);
-          await download(url, archive, onBytes);
-          progress.report({ message: `extracting ${name}...` });
+          await download(url, archive, report.file(mb * 1024 * 1024));
+          report.message(`extracting ${name}...`);
           await extractTarBz2(archive, dir);
           fs.rmSync(archive, { force: true });
         }

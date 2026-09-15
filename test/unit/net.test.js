@@ -57,3 +57,14 @@ test("a proxy that is not there is reported as such, not as a failure of the sit
     /could not reach the proxy 127\.0\.0\.1:1/
   );
 });
+
+test("a download over anything but https is refused", async () => {
+  // The URL of a translation model comes from the package index, and a
+  // redirect names its own: neither may send the request in the clear or
+  // point at this machine's own files.
+  const dest = path.join(tmpDir("cv-net-"), "x.bin");
+  for (const url of ["http://example.invalid/model.argosmodel", "file:///etc/passwd"]) {
+    await assert.rejects(() => download(url, dest, () => {}), /https only/, url);
+  }
+  assert.equal(fs.existsSync(dest), false, "nothing was written");
+});

@@ -205,7 +205,7 @@ test("the privacy audit's countable claims are true", () => {
     privacy.includes(`${written} URLs exist`),
     `PRIVACY.md must say "${written} URLs exist"; the tree has ${urls.size}: ${[...urls].join(", ")}`
   );
-  const count = { 2: "two", 3: "three", 4: "four", 5: "five" }[importers.size];
+  const count = { 2: "two", 3: "three", 4: "four", 5: "five", 6: "six" }[importers.size];
   assert.ok(
     privacy.includes(`imported by exactly ${count} files`),
     `PRIVACY.md must say the HTTP client is imported by exactly ${count} files: ${[...importers].join(", ")}`

@@ -3,6 +3,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { pickWithPreview } from "../ui/prompts";
 import { download } from "../tts/net";
+import { DownloadReport } from "../ui/downloads";
 import { CURATED_VOICES, HF_BASE, listPiperVoices, piperVoicesDir } from "../tts/piper";
 
 /** Fetch one curated voice model; returns its local path. */
@@ -16,7 +17,6 @@ export async function fetchCuratedVoice(
     return modelPath;
   }
   fs.mkdirSync(dir, { recursive: true });
-  const totalBytes = voice.mb * 1024 * 1024;
   try {
     await vscode.window.withProgress(
       {
@@ -25,13 +25,9 @@ export async function fetchCuratedVoice(
         cancellable: false,
       },
       async (progress) => {
-        let got = 0;
-        const onBytes = (n: number) => {
-          got += n;
-          progress.report({ increment: (n / totalBytes) * 100, message: `${Math.round(got / 1024 / 1024)} MB` });
-        };
+        const report = new DownloadReport(progress);
         await download(`${HF_BASE}/${voice.hfDir}/${voice.id}.onnx.json`, `${modelPath}.json`, () => {});
-        await download(`${HF_BASE}/${voice.hfDir}/${voice.id}.onnx`, modelPath, onBytes);
+        await download(`${HF_BASE}/${voice.hfDir}/${voice.id}.onnx`, modelPath, report.file(voice.mb * 1024 * 1024));
       }
     );
     return modelPath;

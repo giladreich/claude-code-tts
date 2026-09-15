@@ -104,11 +104,16 @@ function connectThrough(proxy: URL, target: URL): Promise<tls.TLSSocket> {
   });
 }
 
-/** HTTPS download following redirects (GitHub/Hugging Face redirect to CDNs). */
+/**
+ * HTTPS download following redirects (GitHub/Hugging Face redirect to CDNs).
+ * `onBytes` is given each chunk's size and, with it, the total the server
+ * named in Content-Length (undefined when it named none), so a caller can
+ * say how far the download is.
+ */
 export function download(
   url: string,
   dest: string,
-  onBytes: (n: number) => void,
+  onBytes: (n: number, total?: number) => void,
   lookup: ProxyLookup = {},
   redirects = 0
 ): Promise<void> {
@@ -122,6 +127,15 @@ export function download(
     };
     const proxy = proxyFor(url, { proxy: lookup.proxy ?? proxySetting(), env: lookup.env });
     const target = new URL(url);
+    // TLS or nothing. A redirect or an index entry naming http:// would send
+    // the request in the clear, and file:// would read this machine's own disk
+    // into the destination. Refused here rather than left to https.get, which
+    // throws inside the proxy path where nothing reports it and the caller
+    // waits on a promise that never settles.
+    if (target.protocol !== "https:") {
+      fail(new Error(`refusing to download over ${target.protocol} (https only): ${url}`));
+      return;
+    }
     const request = (socket?: tls.TLSSocket) => {
       const req = https.get(
         url,
@@ -144,7 +158,8 @@ export function download(
           }
           const out = fs.createWriteStream(dest);
           res.setTimeout(IDLE_TIMEOUT_MS, () => res.destroy(new Error(`no data from ${target.host} for a minute`)));
-          res.on("data", (chunk: Buffer) => onBytes(chunk.length));
+          const total = Number(res.headers["content-length"]) || undefined;
+          res.on("data", (chunk: Buffer) => onBytes(chunk.length, total));
           res.pipe(out);
           out.on("finish", () => out.close(() => resolve()));
           out.on("error", fail);
@@ -154,7 +169,13 @@ export function download(
       req.on("error", fail);
     };
     if (proxy) {
-      connectThrough(proxy, target).then(request, fail);
+      connectThrough(proxy, target).then((socket) => {
+        try {
+          request(socket);
+        } catch (e) {
+          fail(e as Error); // a throw here would be an unhandled rejection, and the caller would wait forever
+        }
+      }, fail);
     } else {
       request();
     }

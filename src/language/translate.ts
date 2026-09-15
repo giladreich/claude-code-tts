@@ -9,10 +9,12 @@
  */
 
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { splitSentences } from "../speech/format";
 import { maskTerms, restoreTerms, stripMarks, survivingMarks } from "./glossary";
 import { uvToolPython } from "../platform/platform";
+import { download } from "../tts/net";
 import { PyTtsDaemon } from "../tts/pyDaemon";
 
 export function findTranslatePython(): string | undefined {
@@ -40,6 +42,8 @@ export interface TranslatorOptions {
   keepTerms?: () => string[];
   /** Injected in tests. */
   python?: string;
+  /** How a model file is fetched (net.ts download); a test serves a local file. */
+  fetch?: typeof download;
 }
 
 /**
@@ -155,12 +159,28 @@ export class Translator {
   }
 
   /** Download a model for a pair. Explicit, user-initiated, ~100 MB. */
-  async install(from: string, to: string): Promise<void> {
+  /**
+   * Fetch and install one direction's model. The daemon says where the
+   * model is published and installs the file; the fetch itself is this
+   * extension's (net.ts), so it goes through the editor's proxy and reports
+   * its bytes and total to `onBytes` as every other download does.
+   */
+  async install(from: string, to: string, onBytes: (n: number, total?: number) => void = () => {}): Promise<void> {
     const d = this.connect();
     if (!d) {
       throw new Error("the translation runtime is not installed");
     }
-    await d.request({ op: "install", from, to }).promise;
+    const where = (await d.request({ op: "locate", from, to }).promise) as { url?: unknown; name?: unknown };
+    if (typeof where.url !== "string" || typeof where.name !== "string") {
+      throw new Error(`the translation index names no download for ${from} to ${to}`);
+    }
+    const file = path.join(os.tmpdir(), `claude-code-tts-${process.pid}-${where.name}`);
+    try {
+      await (this.opts.fetch ?? download)(where.url, file, onBytes);
+      await d.request({ op: "install", from, to, path: file }).promise;
+    } finally {
+      fs.rm(file, { force: true }, () => {});
+    }
     this.missingUntil.delete(`${from}>${to}`);
     this.reportedMissing.delete(`${from}>${to}`);
   }
