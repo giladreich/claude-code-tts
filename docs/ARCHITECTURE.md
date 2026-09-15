@@ -26,7 +26,7 @@ flowchart TB
         C1["Mute, pause, skip, repeat"]
         C2["Rate, dynamic catch-up"]
         C3["History, previews, filters"]
-        C4["Completion sounds via hooks"]
+        C4["Notification sounds via hooks"]
         C5["Speak in another language,<br/>translated on the machine"]
     end
     Input --> Speech --> Voices

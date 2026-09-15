@@ -6,6 +6,9 @@ import { qwen3Backend } from "../tts/qwen3";
 import { systemBackend } from "../tts/system";
 import { detectLanguage, engineSpeaks, LanguageTracker } from "../language/language";
 import { Backend, LanguageVoice, SpeakRequest, Speaker, SpeechConfig } from "../tts/types";
+import { getPersistentPlayer } from "../tts/audio";
+import { playWavFile } from "../tts/wavPlayers";
+import { wavFileSeconds } from "../tts/wav";
 
 export { SpeechConfig } from "../tts/types";
 
@@ -394,6 +397,58 @@ export class SpeechQueue {
       onDone?.();
       return;
     }
+    this.beginPreview(onDone);
+
+    // Stated or detected, never left out: a Qwen3 clone told nothing falls
+    // back to the language it was made for, and a German voice auditioned
+    // with an English sentence then read English as if it were German.
+    const req: SpeakRequest = {
+      text,
+      wpm: rate ?? this.config.rate,
+      voice,
+      volume: this.config.volume,
+      preview: true,
+      language: language ?? (this.config.autoLanguage ? detectLanguage(text) : undefined),
+    };
+    const speaker: Speaker = backend.speak(
+      req,
+      () => this.endPreview(speaker),
+      (msg) => this.onError(`preview: ${msg}`)
+    );
+    this.previewSpeaker = speaker;
+    this.onStateChange?.(true);
+  }
+
+  /**
+   * Play a ready-made recording as a preview (a notification sound, a
+   * voice's sample), with the same interruption and resumption as
+   * preview(): through the persistent player where there is one, which is
+   * the path speech takes, takes the volume and starts at once; otherwise
+   * through a player of its own per file.
+   */
+  previewFile(file: string, volume: number, onDone?: () => void): void {
+    this.beginPreview(onDone);
+    const persistent = getPersistentPlayer();
+    let speaker: Speaker;
+    if (persistent) {
+      const playback = persistent.play(file, 1, Math.max(0, Math.min(1, volume / 100)));
+      speaker = { kill: () => playback.cancel() };
+      playback.done.then(
+        () => this.endPreview(speaker),
+        () => this.endPreview(speaker)
+      );
+    } else {
+      // No end signal from a spawned player: the file's length is the end.
+      const playing = playWavFile(file, volume);
+      speaker = { kill: () => playing.stop() };
+      setTimeout(() => this.endPreview(speaker), Math.round(((wavFileSeconds(file) ?? 2) + 0.2) * 1000));
+    }
+    this.previewSpeaker = speaker;
+    this.onStateChange?.(true);
+  }
+
+  /** What every preview does first: supersede the one before it and set the queue aside. */
+  private beginPreview(onDone?: () => void): void {
     this.previewActive = true;
     if (this.previewSpeaker) {
       this.previewSpeaker.kill();
@@ -411,36 +466,19 @@ export class SpeechQueue {
         this.queue.unshift({ text: interrupted, group });
       }
     }
+  }
 
-    // Stated or detected, never left out: a Qwen3 clone told nothing falls
-    // back to the language it was made for, and a German voice auditioned
-    // with an English sentence then read English as if it were German.
-    const req: SpeakRequest = {
-      text,
-      wpm: rate ?? this.config.rate,
-      voice,
-      volume: this.config.volume,
-      preview: true,
-      language: language ?? (this.config.autoLanguage ? detectLanguage(text) : undefined),
-    };
-    const speaker: Speaker = backend.speak(
-      req,
-      () => {
-        // Superseded by a newer preview
-        if (this.previewSpeaker !== speaker) {
-          return;
-        }
-        this.previewSpeaker = undefined;
-        this.previewActive = false;
-        this.previewDone?.();
-        this.previewDone = undefined;
-        this.pump();
-        this.onStateChange?.(this.current !== undefined);
-      },
-      (msg) => this.onError(`preview: ${msg}`)
-    );
-    this.previewSpeaker = speaker;
-    this.onStateChange?.(true);
+  /** A preview ended on its own; a superseded one changes nothing. */
+  private endPreview(speaker: Speaker): void {
+    if (this.previewSpeaker !== speaker) {
+      return;
+    }
+    this.previewSpeaker = undefined;
+    this.previewActive = false;
+    this.previewDone?.();
+    this.previewDone = undefined;
+    this.pump();
+    this.onStateChange?.(this.current !== undefined);
   }
 
   /** End any preview and let the main queue continue. */

@@ -181,7 +181,7 @@
       },
       {
         "command": "claudeCodeTts.toggleNotifications",
-        "title": "Toggle Completion Sounds",
+        "title": "Toggle Notification Sounds",
         "category": "Claude Code TTS"
       },
       {
@@ -517,22 +517,24 @@
           "claudeCodeTts.notifications.enabled": {
             "type": "boolean",
             "default": true,
-            "description": "Play a sound when Claude finishes or needs you. Uses Claude Code hooks, so it works for terminal sessions and even with VSCode closed. The hooks are installed the first time this extension runs and removed when it is uninstalled; the 'Toggle Completion Sounds' command turns them off in between.",
+            "description": "Play a sound when Claude finishes or needs you. Uses Claude Code hooks, so it works for terminal sessions and even with VSCode closed. The hooks are installed the first time this extension runs and removed when it is uninstalled; the 'Toggle Notification Sounds' command turns them off in between.",
             "order": 0,
             "scope": "machine-overridable"
           },
           "claudeCodeTts.notifications.sounds": {
             "type": "object",
             "default": {
-              "done": "Glass",
-              "permission": "Funk",
-              "question": "Ping",
-              "waiting": "Purr"
+              "done": "builtin/done",
+              "permission": "builtin/permission",
+              "question": "builtin/question",
+              "waiting": "builtin/waiting",
+              "tool": "builtin/tool",
+              "subagent": "builtin/subagent"
             },
             "additionalProperties": {
               "type": "string"
             },
-            "markdownDescription": "Which sound plays for each event, by name from the system sound library. Set an event to an empty string to silence it: a silent event installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one.",
+            "markdownDescription": "Which sound plays for each event: one of the extension's own (`builtin/<name>`: generated for it, the same on every platform, listed in **Configure Notification Sounds**; on by default for every event but `prompt`, each with its own: `builtin/done`, `builtin/question`, `builtin/permission`, `builtin/waiting`, `builtin/tool` and `builtin/subagent`), the absolute path of a sound file of yours, or a name from the system sound library. Set an event to an empty string to silence it: a silent event installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one.",
             "order": 1,
             "scope": "machine-overridable"
           },
@@ -886,7 +888,7 @@
     ]
   },
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true,maxRetries:20,retryDelay:250})\"",
     "compile": "npm run clean && tsc -p ./",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.js\" \"*.json\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.js\" \"*.json\"",

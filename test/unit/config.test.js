@@ -15,7 +15,7 @@ const harness = createVscodeStub({
 installVscodeStub(harness.stub);
 const { runtime } = require("../../out/core/runtime.js");
 runtime.context = harness.context(tmpDir("cv-config-storage-"));
-const { readConfig, chunkPlan, chunkPlanFor, firstChunk } = require("../../out/core/config.js");
+const { readConfig, chunkPlan, chunkPlanFor, firstChunk, DEFAULT_SOUNDS } = require("../../out/core/config.js");
 
 test("the config reads with Qwen3 selected and no runtime for it, and its merge limit is the plan's first chunk", () => {
   // Used to recurse: the merge limit came from chunkPlanFor, whose default
@@ -57,4 +57,26 @@ test("the plan depends on the runtime it is given, not on the settings", () => {
   assert.equal(chunkPlan("system", "0.6B", undefined), 260);
   assert.equal(firstChunk(260), 260);
   assert.equal(firstChunk([45, 70, 90]), 45);
+});
+
+test("the shipped sounds are found by their setting name, in storage or in the extension itself", () => {
+  const { soundPath, builtinSounds } = require("../../out/setup/notifySetup.js");
+  const BUILTIN_SOUNDS = builtinSounds(runtime.context);
+  assert.ok(BUILTIN_SOUNDS.length > 20, `the shipped catalogue is read from index.json: ${BUILTIN_SOUNDS.length}`);
+  assert.ok(
+    BUILTIN_SOUNDS.every((s) => s.group && s.label),
+    "every entry has a group and a label"
+  );
+  for (const s of BUILTIN_SOUNDS) {
+    const file = soundPath(s.value, runtime.context);
+    assert.ok(file && file.endsWith(`${s.value.slice("builtin/".length)}.wav`), `${s.value} -> ${file}`);
+  }
+  assert.equal(soundPath("builtin/nothing", runtime.context), undefined);
+  assert.equal(soundPath("", runtime.context), undefined);
+  for (const event of Object.keys(DEFAULT_SOUNDS)) {
+    assert.ok(
+      BUILTIN_SOUNDS.some((s) => s.value === DEFAULT_SOUNDS[event]),
+      `${event} defaults to a shipped sound`
+    );
+  }
 });

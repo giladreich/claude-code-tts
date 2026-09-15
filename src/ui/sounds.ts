@@ -1,5 +1,5 @@
 /**
- * Completion sounds, as a person sets them up.
+ * Notification sounds, as a person sets them up.
  *
  * The sounds are played by a script Claude Code runs (see
  * src/setup/notifySetup.ts and assets/notify.js); this is the part someone
@@ -8,16 +8,24 @@
  */
 import * as fs from "fs";
 import * as vscode from "vscode";
+import * as path from "path";
 import { config, DEFAULT_SOUNDS } from "../core/config";
-import { hooksInstalled, installHooksNow, listSystemSounds, notifyScriptPath, soundPath } from "../setup/notifySetup";
+import {
+  builtinSounds,
+  hooksInstalled,
+  installHooksNow,
+  listSystemSounds,
+  notifyScriptPath,
+  soundPath,
+} from "../setup/notifySetup";
 import { runtime } from "../core/runtime";
 import { livePreviewPicker, MenuOutcome, pickManyWithBack } from "./prompts";
 
-/** Set once the completion-sound hooks have been installed and announced. */
+/** Set once the notification-sound hooks have been installed and announced. */
 const HOOKS_KEY = "claudeCodeTts.hooksAnnounced";
 
 /**
- * Install the completion-sound hooks on a machine that has never had them,
+ * Install the notification-sound hooks on a machine that has never had them,
  * and say so once. Silent installation of a file outside the editor would be
  * the wrong kind of helpful, so the notice names what changed and offers the
  * switch that undoes it; it is shown once per installation.
@@ -57,7 +65,7 @@ export async function testCompletionSound(): Promise<void> {
   if (!hooksInstalled(runtime.context) || !fs.existsSync(script)) {
     const FIX = "Install them again";
     const pick = await vscode.window.showWarningMessage(
-      "Claude Code TTS: the completion-sound hooks are not in Claude Code's settings, so nothing would play.",
+      "Claude Code TTS: the notification-sound hooks are not in Claude Code's settings, so nothing would play.",
       FIX
     );
     if (pick === FIX) {
@@ -139,13 +147,20 @@ const COMMON_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebS
  * straight back from the default and the event keeps sounding. An empty
  * string is a value, and a value replaces the default.
  */
-export async function setSound(kind: string, sound: string): Promise<void> {
+export async function setSound(kind: string, sound: string | undefined): Promise<void> {
   // Fetched here, never passed in: a WorkspaceConfiguration is a snapshot of
   // the settings as they were when it was taken. Building the map from a
   // snapshot taken before the previous change dropped that change, and
   // reading a description from one made a sound just set read as "off".
   const c = vscode.workspace.getConfiguration("claudeCodeTts");
-  const current = { ...c.get<Record<string, string>>("notifications.sounds", DEFAULT_SOUNDS), [kind]: sound };
+  const current = { ...c.get<Record<string, string>>("notifications.sounds", DEFAULT_SOUNDS) };
+  // undefined restores the default: the key is dropped from the object,
+  // and the merge over package.json's default gives the event its default back.
+  if (sound === undefined) {
+    delete current[kind];
+  } else {
+    current[kind] = sound;
+  }
   await c.update("notifications.sounds", current, vscode.ConfigurationTarget.Global);
 }
 
@@ -195,9 +210,14 @@ export async function configureSounds(back = false): Promise<MenuOutcome> {
     // reads as a broken setting rather than an empty list.
     const tools = settings.get<string[]>("notifications.toolFilter", ["Bash"]);
     const describeSound = (event: string): string => {
-      const sound = configured[event];
+      const value = configured[event] ?? "";
+      const sound = soundLabel(value);
       if (!sound) {
         return "off";
+      }
+      const fallback = DEFAULT_SOUNDS[event];
+      if (fallback && value !== fallback) {
+        return `${sound}; default: ${soundLabel(fallback)}`;
       }
       return event === "tool"
         ? `${sound} (${tools.length ? tools.join(", ") : "no tools chosen, so it never plays"})`
@@ -212,7 +232,7 @@ export async function configureSounds(back = false): Promise<MenuOutcome> {
         event: s.event,
       })),
       placeholder: "Highlight an event to hear its sound; Enter changes it",
-      title: "Completion sounds",
+      title: "Notification sounds",
       back,
       matchOnDetail: true,
       debounceMs: 200,
@@ -231,35 +251,105 @@ export async function configureSounds(back = false): Promise<MenuOutcome> {
   }
 }
 
-/** The sound list for one event. Escape returns to the list of events. */
+/** How a setting value reads in a list: a shipped sound by its label, a file by its name, a system sound as it is. */
+export function soundLabel(value: string): string {
+  if (!value) {
+    return "";
+  }
+  const own = builtinSounds().find((s) => s.value === value);
+  if (own) {
+    return `${own.label} (built in)`;
+  }
+  if (path.isAbsolute(value)) {
+    return `${path.basename(value)} (your file)`;
+  }
+  return soundPath(value) ? value : `${value} (not on this machine; the built-in sound plays)`;
+}
+
+/**
+ * The sound list for one event: the shipped sounds, a file of your own, then
+ * this machine's system sounds. Escape returns to the list of events.
+ */
 export async function pickSoundFor(category: (typeof SOUND_CATEGORIES)[number]): Promise<void> {
   const current =
     vscode.workspace
       .getConfiguration("claudeCodeTts")
       .get<Record<string, string>>("notifications.sounds", DEFAULT_SOUNDS)[category.event] ?? "";
   const OFF = "(off)";
+  const FILE = "Choose a sound file...";
+  const DEFAULT = "Use the default";
+  const fallback = DEFAULT_SOUNDS[category.event];
+  const is = (value: string) => (value === current ? "current" : "");
+  const separator = (label: string) => ({ label, value: "", kind: vscode.QuickPickItemKind.Separator });
+  // The two made for this event first, then the rest of the shipped ones by group.
+  const all = builtinSounds();
+  const forEvent = all.filter((s) => s.event === category.event);
+  const others = all.filter((s) => s.event !== category.event);
+  const groups = [...new Set(others.map((s) => s.group))];
+  const shipped = (s: (typeof all)[number]) => ({
+    label: s.label,
+    value: s.value,
+    description: [is(s.value), s.value === fallback ? "default" : ""].filter(Boolean).join(", "),
+    detail: s.detail,
+  });
   await livePreviewPicker({
     items: [
-      { label: OFF, description: current === "" ? "current" : "", detail: "No sound for this event" },
+      separator("Actions"),
+      ...(fallback
+        ? [
+            {
+              label: DEFAULT,
+              value: DEFAULT,
+              description: soundLabel(fallback),
+              detail: "Back to the sound this event ships with",
+            },
+          ]
+        : []),
+      { label: OFF, value: "", description: is(""), detail: "No sound for this event" },
+      {
+        label: FILE,
+        value: FILE,
+        description: path.isAbsolute(current) ? `current: ${path.basename(current)}` : "",
+        detail: "A WAV of your own (MP3 plays on Windows and macOS too)",
+      },
+      separator("Made for this event"),
+      ...forEvent.map(shipped),
+      ...groups.flatMap((group) => [separator(group), ...others.filter((s) => s.group === group).map(shipped)]),
+      separator("System sounds"),
       ...listSystemSounds().map((name) => ({
         label: name,
-        description: name === current ? "current" : "",
+        value: name,
+        description: is(name),
         detail: "",
       })),
     ],
     placeholder: `${category.label}: highlight a sound to hear it; Enter selects`,
-    title: `Completion sounds: ${category.label}`,
+    title: `Notification sounds: ${category.label}`,
     back: true,
     debounceMs: 200,
     sample: (item) => {
-      const file = item.label === OFF ? undefined : soundPath(item.label);
+      const file = item.value && item.value !== FILE ? soundPath(item.value) : undefined;
       return file ? { text: "", voice: "", file, volume: config().notifications.volume } : undefined;
     },
     accept: async (item) => {
-      await setSound(category.event, item.label === OFF ? "" : item.label);
+      let value: string | undefined = item.value;
+      if (value === DEFAULT) {
+        value = undefined;
+      } else if (value === FILE) {
+        const picked = await vscode.window.showOpenDialog({
+          canSelectMany: false,
+          openLabel: "Use this sound",
+          filters: { Sounds: ["wav", "mp3", "aiff", "aif", "m4a", "ogg", "oga", "flac"] },
+        });
+        if (!picked?.[0]) {
+          return;
+        }
+        value = picked[0].fsPath;
+      }
+      await setSound(category.event, value);
       // The notifications config-change handler syncs the hook config file.
       // For the tool category, follow up with the which-tools multi-select.
-      if (category.event === "tool" && item.label !== OFF) {
+      if (category.event === "tool" && value !== "") {
         await pickToolFilter();
       }
     },

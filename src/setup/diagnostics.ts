@@ -260,10 +260,10 @@ export function checkSetup(i: DiagnosticsInput): Capability[] {
   });
 
   out.push({
-    name: "Completion sounds",
+    name: "Notification sounds",
     status: i.hooksInstalled ? "ok" : "partial",
     detail: i.hooksInstalled ? "Claude Code hooks installed" : "not enabled",
-    fix: i.hooksInstalled ? undefined : "turn completion sounds on",
+    fix: i.hooksInstalled ? undefined : "turn notification sounds on",
     command: i.hooksInstalled ? undefined : "claudeCodeTts.toggleNotifications",
   });
 

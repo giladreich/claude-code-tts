@@ -376,6 +376,34 @@ test("Windows refusing an unsigned library is explained with the way out, and Ch
   assert.doesNotMatch(row.detail, /turned on again/);
 });
 
+test("on a Windows with no node, the hook runs through the batch file that starts the editor as node", () => {
+  const { resolveNodeCommand } = require("../../out/platform/platform.js");
+  const opts = {
+    path: "C:\\Windows\\system32",
+    electron: "C:\\Program Files\\VS Code\\Code.exe",
+    platform: "win32",
+    exists: () => false,
+  };
+  assert.equal(resolveNodeCommand(opts), "node", "nothing better without the wrapper");
+  assert.equal(
+    resolveNodeCommand({
+      ...opts,
+      wrapper: "C:\\Users\\me\\AppData\\Roaming\\Code\\User\\globalStorage\\x\\claude-code-tts-notify.cmd",
+    }),
+    "C:\\Users\\me\\AppData\\Roaming\\Code\\User\\globalStorage\\x\\claude-code-tts-notify.cmd",
+    "a path without spaces needs no quotes, as the other interpreters"
+  );
+  assert.equal(
+    resolveNodeCommand({ ...opts, wrapper: "C:\\Users\\my name\\claude-code-tts-notify.cmd" }),
+    '"C:\\Users\\my name\\claude-code-tts-notify.cmd"'
+  );
+  // A node on the PATH still wins.
+  assert.equal(
+    resolveNodeCommand({ ...opts, exists: (c) => c === "C:\\Windows\\system32\\node.exe", wrapper: "C:\\w.cmd" }),
+    "C:\\Windows\\system32\\node.exe"
+  );
+});
+
 test("an archive is handed to tar by name from its own directory, never with a drive letter", () => {
   // GNU tar reads "C:" in an archive name as a host to connect to.
   const { tarArchiveArg } = require("../../out/platform/platform.js");

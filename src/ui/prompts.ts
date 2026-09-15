@@ -286,7 +286,7 @@ export function pickManyWithBack<T extends vscode.QuickPickItem>(opts: {
  * What a menu did, so the menu that opened it knows what to do next.
  *
  * "ran" means something happened and this menu should be shown again: most
- * settings are changed one after another (three completion sounds, a voice
+ * settings are changed one after another (three notification sounds, a voice
  * then a rate), and closing the menu after each one made every second change
  * start from the status bar again. "back" is the way out to the menu behind
  * this one, and "closed" ends the whole thing.
@@ -518,12 +518,17 @@ export function livePreviewPicker<T extends vscode.QuickPickItem>(opts: {
       }
       timer = setTimeout(() => {
         if (s.file) {
-          // Nothing to synthesize and nothing to interrupt: a ready-made
-          // sample is just audio, so it plays at once even with no model on
-          // the machine.
-          runtime.speech?.stopPreview();
+          // Nothing to synthesize: a ready-made sample is just audio, so it
+          // plays at once even with no model on the machine, through the
+          // queue's preview so the player speech uses plays it (it takes
+          // the volume and starts at once) and speech resumes after it.
           playing?.stop();
-          playing = playWavFile(s.file, s.volume ?? config().speechConfig.volume);
+          const volume = s.volume ?? config().speechConfig.volume;
+          if (runtime.speech) {
+            runtime.speech.previewFile(s.file, volume);
+          } else {
+            playing = playWavFile(s.file, volume);
+          }
           return;
         }
         qp.busy = true; // synthesis takes a moment: show that something is coming

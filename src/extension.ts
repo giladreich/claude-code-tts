@@ -518,7 +518,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Downloads go through the proxy the editor is configured for, when one is.
   setProxySetting(() => vscode.workspace.getConfiguration("http").get<string>("proxy") || undefined);
   // Keep the hook script, hook entries, and config current across updates,
-  // and install them the first time: completion sounds are on by default, and
+  // and install them the first time: notification sounds are on by default, and
   // they only work through Claude Code's own hooks. The script removes them
   // again when it finds this extension uninstalled.
   if (config().notifications.enabled) {
@@ -526,7 +526,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (hooksInstalled(context)) {
       ensureHooksCurrent(context, config().notifications);
     } else {
-      background("completion sounds", () => installDefaultHooks());
+      background("notification sounds", () => installDefaultHooks());
     }
   }
   background("language offer", () => offerDirectLanguages());
@@ -860,13 +860,13 @@ export function activate(context: vscode.ExtensionContext): void {
         syncNotifyRuntime(runtime.context, { ...config().notifications, enabled: true }, runtime.onError);
         demoSound(runtime.context);
         vscode.window.showInformationMessage(
-          "Claude Code TTS: completion sounds enabled (that was the sound). If you also run the Claude Notifier extension, disable it to avoid duplicates."
+          "Claude Code TTS: notification sounds enabled (that was the sound). If you also run the Claude Notifier extension, disable it to avoid duplicates."
         );
       } else {
         removeHooks(runtime.context);
         await c.update("notifications.enabled", false, vscode.ConfigurationTarget.Global);
         syncNotifyRuntime(runtime.context, { ...config().notifications, enabled: false }, runtime.onError);
-        vscode.window.showInformationMessage("Claude Code TTS: completion sounds disabled and hooks removed.");
+        vscode.window.showInformationMessage("Claude Code TTS: notification sounds disabled and hooks removed.");
       }
     }),
     vscode.commands.registerCommand("claudeCodeTts.repeatLast", () => {

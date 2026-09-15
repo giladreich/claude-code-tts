@@ -146,6 +146,23 @@ export function wavDurationSeconds(file: string): number | undefined {
   return wavFileSeconds(file);
 }
 
+/**
+ * How long after the last audio was fed a playback may still be running
+ * before the watchdog calls it stalled and restarts the player. The budget
+ * assumes the slowest tempo the user could switch to mid-play (0.5x) and
+ * adds a grace: a false kill costs speech, a late one only delays stall
+ * recovery.
+ *
+ * A file whose length the header does not give (a system .aiff, an .mp3 of
+ * your own, previewed in the sound picker) has nothing to plan from, and the
+ * grace over a length of zero killed a twelve-second sound at eight and
+ * reported a stall that had not happened; an unknown length only has to
+ * outlast anything a person would play.
+ */
+export function watchdogBudgetMs(audioSecs: number): number {
+  return audioSecs > 0 ? (audioSecs / 0.5) * 1000 + 8000 : 10 * 60_000;
+}
+
 class PersistentPlayer {
   private proc: ChildProcess | undefined;
   /** The playback whose completion we are waiting for, keyed by stream id. */
@@ -268,10 +285,6 @@ class PersistentPlayer {
       clearTimeout(this.idleTimer);
     }
     this.ensureProc();
-    // Deadline math assumes the slowest tempo the user could switch to
-    // mid-play (0.5x): a false watchdog kill costs speech, a late one only
-    // delays stall recovery.
-    const budgetMs = (secs: number) => (secs / 0.5) * 1000;
     let audioSecs = wavDurationSeconds(file) ?? 0;
     let expectedMs = (audioSecs / Math.max(0.5, tempo)) * 1000;
     let startedAt = Date.now();
@@ -307,7 +320,7 @@ class PersistentPlayer {
       if (pausedAt !== undefined) {
         return;
       }
-      const delay = Math.max(1000, fedAt + budgetMs(audioSecs) + 8000 - Date.now());
+      const delay = Math.max(1000, fedAt + watchdogBudgetMs(audioSecs) - Date.now());
       timer = setTimeout(onWatchdog, delay);
     };
     const onWatchdog = () => {

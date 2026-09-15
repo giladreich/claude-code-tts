@@ -45,8 +45,8 @@ The advanced groups are engine internals. Nothing in the everyday groups depends
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `notifications.enabled` | `true` | Completion sounds via Claude Code hooks. The hooks are written to `~/.claude/settings.json` the first time the extension runs, announced once, and removed by the hook script itself when it finds the extension uninstalled. |
-| `notifications.sounds` | `{"done":"Glass","permission":"Funk","question":"Ping","waiting":"Purr"}` | Which sound plays for each event, by name from the system sound library. An event with no entry is silent, and installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one. |
+| `notifications.enabled` | `true` | Notification sounds via Claude Code hooks. The hooks are written to `~/.claude/settings.json` the first time the extension runs, announced once, and removed by the hook script itself when it finds the extension uninstalled. |
+| `notifications.sounds` | `{"done":"builtin/done","permission":"builtin/permission","question":"builtin/question","waiting":"builtin/waiting","tool":"builtin/tool","subagent":"builtin/subagent"}` | Which sound plays for each event: one of the extension's own (`builtin/<name>`: 60 sounds generated for the extension with Stable Audio Open, the same on every platform and 2.6 MB in all, a default and alternatives per event, on for every event but `prompt` unless you change it, listed with a preview in **Configure Notification Sounds**; `assets/sounds/index.json` names them all and `assets/sounds/prompts.json` keeps the prompt and seed behind each), the absolute path of a sound file of yours (WAV everywhere; MP3 on Windows and macOS), or a name from the system sound library. An event with no entry is silent, and installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one. |
 | `notifications.toolFilter` | `["Bash"]` | Which tools trigger that sound. |
 | `notifications.volume` | `70` | Notification sound volume, 0-100. |
 
@@ -112,7 +112,7 @@ Fifteen commands are listed in the palette; the others stay registered so that k
 | `setupQwen3` | Set Up Qwen3 Engine |
 | `setupChatterbox` | Set Up Chatterbox Engine |
 | `setupTranslation` | Set Up Translation |
-| `toggleNotifications` | Toggle Completion Sounds |
+| `toggleNotifications` | Toggle Notification Sounds |
 | `configureSounds` | Configure Notification Sounds |
 | `manageVoices` | My Voices |
 | `designVoice` | Design a Voice from a Description |
@@ -248,7 +248,7 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 | Clone from an audio or video file | yes | yes, with `ffmpeg` installed | yes, with `ffmpeg` installed |
 | Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg`. The system voice through speech-dispatcher (`spd-say`) writes no audio and cannot be exported; `espeak-ng` can | WAV; the rest with `ffmpeg` |
 | Design a voice from a description | yes | yes | yes |
-| Completion sounds (hooks) | yes, per-event sound choice | yes, per-event choice from the desktop sound themes | yes, per-event choice from `C:\Windows\Media` |
+| Notification sounds (hooks) | yes, per-event sound choice | yes, per-event choice from the desktop sound themes | yes, per-event choice from `C:\Windows\Media` |
 
 Run **Claude Code TTS: Check Setup** to see which of these apply on your machine; a Python tool it lists as missing installs from right there. Installing `ffmpeg` is the one step that brings Linux and Windows close to parity, and the only one the extension asks you to run yourself (it needs your package manager): the prompt opens a terminal with the command typed for you to confirm, for the package manager the machine has (apt, dnf, pacman, zypper, Homebrew, winget). On Windows, restart VSCode after a winget install: the editor's PATH is read when it starts.
 

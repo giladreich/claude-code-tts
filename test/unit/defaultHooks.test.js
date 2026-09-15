@@ -1,4 +1,4 @@
-// Completion sounds are on by default, which means activation writes hooks
+// Notification sounds are on by default, which means activation writes hooks
 // into Claude Code's settings.
 //
 // This is the one thing this extension changes outside its own storage, so it
@@ -54,7 +54,7 @@ fs.writeFileSync(
   )
 );
 
-test("activation installs the completion-sound hooks, and says so once", async () => {
+test("activation installs the notification-sound hooks, and says so once", async () => {
   ext.activate(context);
   try {
     await run();

@@ -255,6 +255,13 @@ export function resolveNodeCommand(opts: {
   electron: string;
   platform: NodeJS.Platform;
   exists: (candidate: string) => boolean;
+  /**
+   * On Windows, a batch file that runs the editor's own binary as node
+   * (see notifySetup.ts): the interpreter when no node is installed at all,
+   * which is the usual state of a Windows machine. A bare "node" there was
+   * a hook that failed on every event, with nothing said anywhere.
+   */
+  wrapper?: string;
 }): string {
   const names = opts.platform === "win32" ? ["node.exe", "node.cmd", "node"] : ["node"];
   // The platform is an argument, so neither the separator nor the delimiter
@@ -275,9 +282,14 @@ export function resolveNodeCommand(opts: {
       }
     }
   }
-  // The editor's own binary is node with a flag; on Windows a shell cannot
-  // carry the variable in front of the command, so the bare name stays.
-  return opts.platform === "win32" ? "node" : `ELECTRON_RUN_AS_NODE=1 ${shellQuote(opts.electron)}`;
+  // The editor's own binary is node with a flag. On Windows the flag is an
+  // environment variable no one command line can carry through every shell
+  // a hook may run under, so a batch file sets it; without one, the bare
+  // name stays.
+  if (opts.platform === "win32") {
+    return opts.wrapper ? shellQuote(opts.wrapper, "win32") : "node";
+  }
+  return `ELECTRON_RUN_AS_NODE=1 ${shellQuote(opts.electron)}`;
 }
 
 /**

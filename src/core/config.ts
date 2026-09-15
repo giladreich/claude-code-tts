@@ -14,7 +14,7 @@ import * as vscode from "vscode";
 import { kokoroDaemonScriptOf, kokoroDirOf } from "../setup/kokoroSetup";
 import { runtime } from "./runtime";
 import { SpeechConfig } from "../speech/speech";
-import { NotifyConfig } from "../setup/notifySetup";
+import { bundledSoundsDir, NotifyConfig } from "../setup/notifySetup";
 import { qwen3RuntimeOnDisk, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
 import { SpeedMemory } from "../tts/types";
 import { rateFor, withVoiceRate } from "../speech/voiceRates";
@@ -128,6 +128,7 @@ export function readConfig() {
       volume: c.get<number>("notifications.volume", 70),
       sounds: soundsOf(c.get<Record<string, string>>("notifications.sounds", DEFAULT_SOUNDS)),
       toolFilter: c.get<string[]>("notifications.toolFilter", ["Bash"]),
+      soundsDir: runtime.context ? bundledSoundsDir(runtime.context) : undefined,
     },
     speechConfig: {
       engine: c.get<SpeechConfig["engine"]>("engine", "system"),
@@ -253,12 +254,19 @@ export async function saveVoiceRate(rate: number): Promise<void> {
   );
 }
 
-/** Events that sound out of the box; anything absent is silent. */
+/**
+ * Events that sound out of the box; anything absent is silent. The shipped
+ * sounds (assets/sounds), the same on every platform: the system libraries
+ * differ per platform and a name synced from another machine named nothing
+ * here, and the Windows ones are quiet.
+ */
 export const DEFAULT_SOUNDS: Record<string, string> = {
-  done: "Glass",
-  permission: "Funk",
-  question: "Ping",
-  waiting: "Purr",
+  done: "builtin/done",
+  permission: "builtin/permission",
+  question: "builtin/question",
+  waiting: "builtin/waiting",
+  tool: "builtin/tool",
+  subagent: "builtin/subagent",
 };
 
 /**

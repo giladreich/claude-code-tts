@@ -42,7 +42,7 @@ Nothing to configure: `claude` in any terminal writes the same transcript files 
 
 Two things are worth knowing.
 
-**A VSCode window has to be open.** This is a VSCode extension; the speech comes from it. The window does not have to have your project open, and it can be minimised, but if you close them all the speaking stops. Completion sounds keep working, because Claude Code triggers those itself.
+**A VSCode window has to be open.** This is a VSCode extension; the speech comes from it. The window does not have to have your project open, and it can be minimised, but if you close them all the speaking stops. Notification sounds keep working, because Claude Code triggers those itself.
 
 **Several windows do not talk over each other.** Each window speaks the folders it has open. A session in a folder no window has open (the usual case for a terminal) is spoken by whichever window has been open longest, and only that one. Close it and the next takes over within a minute. **Check Setup** has a row saying whether this window or another one speaks terminal sessions, and how many windows are open. When a message comes from a session that is not this window's own project, the voice says which one it is before reading it.
 
@@ -71,7 +71,7 @@ To go back to only hearing this window's folders, use **Menu**, **Voice and spee
 - **Switch voice while it talks**: pick another voice and the sentence restarts in it at once.
 - **Keep it out of the way**: `onlyWhenUnfocused` speaks only while VSCode is in the background, `ignoredTools` silences noisy tools, and `listenTo` decides whether sessions outside this window's folders are spoken too.
 - **Export what was said**: **Menu**, then **Export spoken audio**, writes the last message, or any part of what was played, as an MP3 or another file, the way it was heard: the voice, the rate and, if you listen in another language, the translation. The sheet shows the size the file will be as you choose the quality and the range, and each sentence can be heard and left out. The last 30 minutes of speech are kept for it (`export.keepMinutes`).
-- **Completion sounds**: **Menu**, then **Completion sounds**, installs Claude Code hooks so a sound plays when Claude finishes or needs you, even with VSCode closed. Each event gets its own sound, chosen by ear.
+- **Notification sounds**: **Menu**, then **Notification sounds**, installs Claude Code hooks so a sound plays when Claude finishes or needs you, even with VSCode closed. Each event gets its own sound, chosen by ear.
 
 ## What to install yourself
 
@@ -85,7 +85,7 @@ winget install Gyan.FFmpeg     # Windows, then restart VSCode
 
 ## Uninstalling
 
-**Menu > Setup and diagnostics > Remove everything Claude Code TTS added** offers to back up your voices, then removes the completion-sound hooks under `~/.claude`, every model, runtime, helper and log it downloaded, and every `claudeCodeTts.*` setting, and tells you what it could not remove (Python tools installed with `uv`, which it does not own, with the command that removes them). Then uninstall from the Extensions view. Uninstalling without that step still removes the hooks, on the next start of VSCode; VSCode deletes the extension's storage folder then too, which is where your voices live, so back them up before uninstalling. Your settings stay in VSCode's settings.json, as every extension's do.
+**Menu > Setup and diagnostics > Remove everything Claude Code TTS added** offers to back up your voices, then removes the notification-sound hooks under `~/.claude`, every model, runtime, helper and log it downloaded, and every `claudeCodeTts.*` setting, and tells you what it could not remove (Python tools installed with `uv`, which it does not own, with the command that removes them). Then uninstall from the Extensions view. Uninstalling without that step still removes the hooks, on the next start of VSCode; VSCode deletes the extension's storage folder then too, which is where your voices live, so back them up before uninstalling. Your settings stay in VSCode's settings.json, as every extension's do.
 
 ## When something is wrong
 

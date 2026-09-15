@@ -135,13 +135,37 @@ function run(payload) {
     } catch {}
 
     const vol = Math.max(0, Math.min(100, cfg.volume ?? 70)) / 100;
+    // The player outlives this process, which exits at once so Claude Code
+    // is not kept waiting. On Windows a child spawned detached exited within
+    // 60 ms without playing (measured with a marker file; PowerShell and
+    // ffplay alike), and one started through cmd's "start /b" played but
+    // opened a console window for its length. So there the player is
+    // started by a PowerShell of its own through Start-Process with the
+    // window hidden, a process the hook's exit does not touch; the hook
+    // waits for that launcher (about 200 ms; a child still starting when
+    // node exits is killed with it, since node keeps its children in a
+    // job), and no window is created.
     const fire = (cmd, args) => {
+      if (process.platform === "win32") {
+        const quote = (a) => `'${String(a).replace(/'/g, "''")}'`;
+        const launch = `Start-Process -WindowStyle Hidden -FilePath ${quote(cmd)} -ArgumentList ${args.map(quote).join(",")}`;
+        try {
+          require("child_process").spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", launch], {
+            stdio: "ignore",
+            windowsHide: true,
+            timeout: 5000,
+          });
+        } catch {}
+        return;
+      }
       const child = spawn(cmd, args, { stdio: "ignore", detached: true, windowsHide: true });
       child.on("error", () => {}); // missing player binary: stay silent, never crash the hook
       child.unref();
     };
 
-    // The configured sound is a name from this platform's sound library; the
+    // The configured sound is one of the extension's own ("builtin/done",
+    // copied next to this script by the extension), a file of the user's
+    // (an absolute path), or a name from this platform's sound library; the
     // per-kind defaults below are only used when that name is not found, so
     // the same configuration works on macOS, Linux and Windows.
     // Sound themes live in different places per distribution, so several
@@ -194,9 +218,25 @@ function run(payload) {
           prompt: ["Windows Navigation Start", "Windows Menu Command", "ding"],
         },
       }[process.platform] || {};
+    const builtin = (candidate) => {
+      const m = /^builtin\/([a-z0-9-]+)$/.exec(candidate);
+      if (!m || !cfg.soundsDir) return undefined;
+      const f = path.join(cfg.soundsDir, `${m[1]}.wav`);
+      return fs.existsSync(f) ? f : undefined;
+    };
     const resolve = (name) => {
-      for (const candidate of [name].concat(fallbacks[kind] || [])) {
+      // The extension's own sound for this kind comes before the platform's
+      // chain: a name this machine does not have (a setting synced from
+      // another platform) is heard as the same sound everywhere.
+      for (const candidate of [name, `builtin/${kind === "stop" ? "done" : kind}`].concat(fallbacks[kind] || [])) {
         if (!candidate) continue;
+        if (path.isAbsolute(candidate)) {
+          if (fs.existsSync(candidate)) return candidate;
+          continue;
+        }
+        const own = builtin(candidate);
+        if (own) return own;
+        if (candidate.startsWith("builtin/")) continue;
         for (const dir of library.dirs) {
           for (const e of library.ext) {
             const f = path.join(dir, candidate + e);
@@ -213,6 +253,10 @@ function run(payload) {
       process.stdout.write(`${file}\n`);
       return;
     }
+    // Silent is silent: no player is started for a volume of zero (the
+    // tests run at zero, and a player that touches the profile directory
+    // while a test removes it fails the test on Windows).
+    if (vol <= 0) return;
 
     // ffplay (from ffmpeg) is used wherever it exists because it is the only
     // one of these that honours the volume setting on every platform.
@@ -232,12 +276,18 @@ function run(payload) {
     } else if (has("ffplay")) {
       fire("ffplay", ["-nodisp", "-autoexit", "-loglevel", "quiet", "-af", `volume=${vol.toFixed(2)}`, file]);
     } else if (process.platform === "win32") {
+      // WPF's MediaPlayer rather than System.Media.SoundPlayer: it takes a
+      // volume (the system sounds are quiet, and the setting did nothing
+      // here), and plays MP3 as well as WAV for a file of the user's own.
+      // No message loop in a plain PowerShell, so the end is polled.
       const psFile = file.replace(/'/g, "''");
       fire("powershell", [
         "-NoProfile",
         "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
         "-Command",
-        `(New-Object Media.SoundPlayer '${psFile}').PlaySync()`,
+        `Add-Type -AssemblyName PresentationCore; $p = New-Object System.Windows.Media.MediaPlayer; $p.Volume = ${vol.toFixed(2)}; $p.Open([Uri]'${psFile}'); $p.Play(); $t = 0; while ($t -lt 15000) { Start-Sleep -Milliseconds 25; $t += 25; if ($p.NaturalDuration.HasTimeSpan -and $p.Position -ge $p.NaturalDuration.TimeSpan) { break } }; Start-Sleep -Milliseconds 250; $p.Close()`,
       ]);
     } else if (has("paplay")) {
       fire("paplay", ["--volume=" + Math.round(vol * 65536), file]);
