@@ -243,7 +243,7 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 | Pitch-preserving rate and live rate change | yes | with `ffplay` or `sox` installed | with `ffplay` (from ffmpeg) |
 | Rate without any of those | yes | Kokoro and Piper hit the rate natively; Qwen3 and Chatterbox cannot | same |
 | Volume control | yes | with `ffplay`, `sox` or `paplay` | with `ffplay` (from ffmpeg); otherwise system volume |
-| Pause mid-word | yes | yes | no (finishes the utterance, then holds) |
+| Pause mid-word | yes | yes | the system voice yes (its speech host holds the synthesizer); the neural engines finish the utterance, then hold |
 | Clone from the microphone | yes | yes, with `ffmpeg` (PulseAudio or ALSA) | yes, with `ffmpeg` (you pick the input device) |
 | Clone from an audio or video file | yes | yes, with `ffmpeg` installed | yes, with `ffmpeg` installed |
 | Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg`. The system voice through speech-dispatcher (`spd-say`) writes no audio and cannot be exported; `espeak-ng` can | WAV; the rest with `ffmpeg` |

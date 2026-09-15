@@ -17,7 +17,7 @@ const ENGINES: Record<
   SpeechConfig["engine"],
   (config: SpeechConfig, onError: (msg: string) => void) => Backend | undefined
 > = {
-  system: (_config, onError) => systemBackend(onError),
+  system: (config, onError) => systemBackend(onError, config.systemHostScript),
   piper: (config, onError) => piperBackend(config.piperPath, onError, config.postSynthesis),
   kokoro: (config, onError) =>
     kokoroBackend(config.kokoroDir, config.kokoroDaemonScript, () => config.pauseScale, onError),

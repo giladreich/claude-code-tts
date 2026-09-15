@@ -237,6 +237,7 @@ Streaming needs both a tempo-capable player and the persistent one, so today it 
 | Helper | Language | Started by | Purpose |
 |---|---|---|---|
 | `assets/wavplayer.swift` | Swift (AVAudioEngine) | `audio.ts`, compiled once into globalStorage/bin | Gapless streaming playback, live rate and volume, pause, device-change recovery, idle device release, underrun logging |
+| `assets/sapi_host.ps1` | Windows PowerShell 5.1 (System.Speech) | `system.ts` on Windows | The built-in Windows voice: one process for the session with a synthesizer speaking and another rendering exports, JSON lines in and out; cancel, pause and resume, live volume. A process per sentence cost a second or two of silence between sentences |
 | `assets/kokoro_daemon.py` | Python (sherpa-onnx) | `kokoro.ts` | Kokoro synthesis, streaming per sentence with reader pauses, cancel, priority |
 | `assets/qwen3_mlx_daemon.py` | Python (mlx-audio) | `qwen3.ts` on Apple Silicon | Qwen3 presets and clones on MLX, streaming, runaway cutoff, per-profile gain. Streaming primes the vocoder with the reference codes once per reference and restores that state before every stream, because a cold vocoder opens an octave high and settles over half a second. Clones go through the clone path directly with the daemon's repetition penalty (1.1; the public `generate()` forces 1.5, which measured flatter and noisier than the speaker) |
 | `assets/qwen3_daemon.py` | Python (qwen-tts, PyTorch) | `qwen3.ts` elsewhere | Same protocol, non-streaming |

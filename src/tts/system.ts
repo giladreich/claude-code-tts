@@ -1,4 +1,5 @@
 import { ChildProcess, execFile, spawn } from "child_process";
+import * as readline from "readline";
 import { hasCommand } from "../platform/platform";
 import { reportPlayed } from "./played";
 import { Backend, killProcess, SpeakRequest, Speaker, VoiceInfo, wrapProcess } from "./types";
@@ -6,8 +7,9 @@ import { Backend, killProcess, SpeakRequest, Speaker, VoiceInfo, wrapProcess } f
 /**
  * The OS-provided engines: `say` on macOS, espeak/speech-dispatcher on Linux,
  * System.Speech via PowerShell on Windows. Instant and dependency-free.
+ * `hostScript` is the persistent Windows speech host (see windowsBackend).
  */
-export function systemBackend(onError: (msg: string) => void): Backend | undefined {
+export function systemBackend(onError: (msg: string) => void, hostScript?: string): Backend | undefined {
   switch (process.platform) {
     case "darwin":
       return darwinBackend();
@@ -19,7 +21,7 @@ export function systemBackend(onError: (msg: string) => void): Backend | undefin
       return b;
     }
     case "win32":
-      return windowsBackend();
+      return windowsBackend(hostScript);
     default:
       onError(`Unsupported platform for TTS: ${process.platform}`);
       return undefined;
@@ -301,27 +303,281 @@ function renderWindows(req: SpeakRequest, out: string): Promise<void> {
   return rendered(child, req.text, "powershell");
 }
 
-function windowsBackend(): Backend {
+/** A sentence spoken by its own PowerShell process: the way it was done before the host, kept as the fallback. */
+function speakWindowsPerProcess(req: SpeakRequest, onDone: () => void, onError: (msg: string) => void): Speaker {
+  const { text, wpm, voice, volume } = req;
+  const voicePs = psQuote(voice);
+  const script =
+    PS_UTF8 +
+    "Add-Type -AssemblyName System.Speech; " +
+    "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
+    `$s.Rate = ${sapiRate(wpm)}; ` +
+    `$s.Volume = ${Math.max(0, Math.min(100, Math.round(volume)))}; ` +
+    (voicePs ? `try { $s.SelectVoice('${voicePs}') } catch {}; ` : "") +
+    "$s.Speak([Console]::In.ReadToEnd())";
+  const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    stdio: ["pipe", "ignore", "ignore"],
+    windowsHide: true,
+  });
+  child.stdin?.end(text);
+  return speakAndReport(child, "powershell", false, req, (out) => renderWindows(req, out), onDone, onError);
+}
+
+/** What the host answers to one request. */
+interface HostReply {
+  id: number;
+  ok: boolean;
+  error?: string;
+  cancelled?: boolean;
+}
+
+/**
+ * The persistent speech host (assets/sapi_host.ps1): one PowerShell process
+ * for the session, with a synthesizer speaking and another rendering
+ * exports, driven by JSON lines. Starting a PowerShell, loading the speech
+ * assemblies and opening the audio device for every sentence was a second or
+ * two of silence between sentences on a laptop, and speech fell behind
+ * Claude; it also made pausing mid-word impossible, since a process on
+ * Windows cannot be frozen.
+ */
+class SapiHost {
+  private readonly proc: ChildProcess;
+  private nextId = 1;
+  private readonly pending = new Map<number, { resolve: (r: HostReply) => void; reject: (e: Error) => void }>();
+  readonly ready: Promise<void>;
+  /** The host started and answered; a failure after this is a crash, not a machine that cannot run it. */
+  everReady = false;
+  alive = true;
+  private failed: (why: string) => void = () => {};
+
+  constructor(script: string) {
+    this.proc = spawn("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let readyResolve!: () => void;
+    let readyReject!: (e: Error) => void;
+    this.ready = new Promise<void>((res, rej) => ((readyResolve = res), (readyReject = rej)));
+    this.ready.catch(() => {});
+    const readyTimer = setTimeout(() => this.fail("did not start within 30s"), 30_000);
+    readyTimer.unref?.();
+    this.failed = (why) => {
+      clearTimeout(readyTimer);
+      readyReject(new Error(why));
+    };
+    let stderr = "";
+    this.proc.stderr?.on("data", (d) => (stderr = (stderr + String(d)).slice(-400)));
+    const rl = readline.createInterface({ input: this.proc.stdout! });
+    rl.on("line", (line) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if ("ready" in msg) {
+        if (msg.ready) {
+          clearTimeout(readyTimer);
+          this.everReady = true;
+          readyResolve();
+        } else {
+          this.fail(String(msg.error ?? "System.Speech could not be loaded"));
+        }
+        return;
+      }
+      const p = this.pending.get(msg.id);
+      if (p) {
+        this.pending.delete(msg.id);
+        p.resolve(msg as HostReply);
+      }
+    });
+    this.proc.on("error", (e) => this.fail(e.message));
+    // A write into a host that has just died raises on the pipe, not on the
+    // process; unhandled, that is an exception in the extension host.
+    this.proc.stdin?.on("error", (e) => this.fail(`stdin closed: ${e.message}`));
+    this.proc.on("exit", (code) => {
+      const reason = stderr.trim().split("\n").filter(Boolean).pop() ?? "";
+      this.fail(`exited with ${code}${reason ? `: ${reason.slice(0, 200)}` : ""}`);
+    });
+  }
+
+  private fail(why: string): void {
+    if (!this.alive) {
+      return;
+    }
+    this.alive = false;
+    this.failed(why);
+    for (const p of this.pending.values()) {
+      p.reject(new Error(why));
+    }
+    this.pending.clear();
+    killProcess(this.proc);
+  }
+
+  /** Send a request the host answers by id. */
+  request(msg: Record<string, unknown>): Promise<HostReply> {
+    return new Promise((resolve, reject) => {
+      if (!this.alive) {
+        return reject(new Error("speech host stopped"));
+      }
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject });
+      this.write({ id, ...msg });
+    });
+  }
+
+  /** Send a control message nothing answers. */
+  send(msg: Record<string, unknown>): void {
+    if (this.alive) {
+      this.write(msg);
+    }
+  }
+
+  private write(msg: Record<string, unknown>): void {
+    try {
+      this.proc.stdin?.write(JSON.stringify(msg) + "\n");
+    } catch (e) {
+      this.fail((e as Error).message);
+    }
+  }
+
+  dispose(): void {
+    if (!this.alive) {
+      return;
+    }
+    this.alive = false;
+    for (const p of this.pending.values()) {
+      p.reject(new Error("speech host stopped"));
+    }
+    this.pending.clear();
+    try {
+      this.proc.stdin?.end(JSON.stringify({ quit: true }) + "\n");
+    } catch {
+      /* already gone */
+    }
+    const grace = setTimeout(() => killProcess(this.proc), 2000);
+    grace.unref?.();
+    this.proc.once("exit", () => clearTimeout(grace));
+  }
+}
+
+function windowsBackend(hostScript: string | undefined): Backend {
+  let host: SapiHost | undefined;
+  /** The host could not start on this machine: a process per sentence for the rest of the session. */
+  let hostBroken = false;
+  /** This backend was replaced or shut down: a render that runs later must not start a host nothing will stop. */
+  let disposed = false;
+  const hostFor = (): SapiHost | undefined => {
+    if (!hostScript || hostBroken || disposed) {
+      return undefined;
+    }
+    if (!host?.alive) {
+      host = new SapiHost(hostScript);
+    }
+    return host;
+  };
+  /** The same utterance rendered again for an export, through the host, or by a process when there is none. */
+  const renderThrough = (req: SpeakRequest): Render => {
+    return async (out) => {
+      const h = hostFor();
+      if (!h) {
+        return renderWindows(req, out);
+      }
+      await h.ready;
+      const reply = await h.request({ render: req.text, out, rate: sapiRate(req.wpm), voice: req.voice });
+      if (!reply.ok) {
+        throw new Error(reply.error ?? "render failed");
+      }
+    };
+  };
   return {
     name: "powershell",
-    canFreeze: false, // no SIGSTOP on win32
+    canFreeze: true,
     speak(req, onDone, onError) {
+      const h = hostFor();
+      if (!h) {
+        return speakWindowsPerProcess(req, onDone, onError);
+      }
       const { text, wpm, voice, volume } = req;
-      const voicePs = psQuote(voice);
-      const script =
-        PS_UTF8 +
-        "Add-Type -AssemblyName System.Speech; " +
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
-        `$s.Rate = ${sapiRate(wpm)}; ` +
-        `$s.Volume = ${Math.max(0, Math.min(100, Math.round(volume)))}; ` +
-        (voicePs ? `try { $s.SelectVoice('${voicePs}') } catch {}; ` : "") +
-        "$s.Speak([Console]::In.ReadToEnd())";
-      const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
-        stdio: ["pipe", "ignore", "ignore"],
-        windowsHide: true,
-      });
-      child.stdin?.end(text);
-      return speakAndReport(child, "powershell", false, req, (out) => renderWindows(req, out), onDone, onError);
+      const startedAt = Date.now();
+      let finished = false;
+      let killed = false;
+      /** The process speaking this sentence instead, when the host turned out not to start. */
+      let fallback: Speaker | undefined;
+      const finish = () => {
+        if (!finished) {
+          finished = true;
+          onDone();
+        }
+      };
+      h.ready
+        .then(() => {
+          if (killed) {
+            return undefined;
+          }
+          return h.request({ speak: text, rate: sapiRate(wpm), volume: Math.round(volume), voice });
+        })
+        .then(
+          (reply) => {
+            if (reply && !killed && !reply.ok && !reply.cancelled) {
+              onError(`powershell failed: ${reply.error ?? "unknown error"}`);
+            }
+            if (reply?.ok && !killed && !req.preview) {
+              reportPlayed({
+                text,
+                engine: "powershell",
+                voice,
+                wpm,
+                language: req.language,
+                group: req.group,
+                tempo: 1,
+                synthSpeed: 1,
+                startedAt,
+                endedAt: Date.now(),
+                render: renderThrough(req),
+              });
+            }
+            finish();
+          },
+          (e: Error) => {
+            if (finished || killed) {
+              return finish();
+            }
+            if (!h.everReady) {
+              // This machine will not run the host (a PowerShell that cannot
+              // load System.Speech): the old way, a process per sentence,
+              // still speaks, so this sentence and the rest go that way.
+              hostBroken = true;
+              onError(`the speech host did not start (${e.message}); speaking through a process per sentence`);
+              finished = true;
+              fallback = speakWindowsPerProcess(req, onDone, onError);
+              return;
+            }
+            onError(`powershell failed: ${e.message}`);
+            finish();
+          }
+        );
+      return {
+        kill: () => {
+          killed = true;
+          fallback?.kill();
+          // Only the sentence still in progress: a late kill on a finished
+          // one would cut whatever the host is speaking by now.
+          if (!finished) {
+            h.send({ cancel: true });
+          }
+        },
+        freeze: () => h.send({ pause: true }),
+        unfreeze: () => h.send({ resume: true }),
+      };
+    },
+    setLiveVolume(volume) {
+      host?.send({ volume: Math.round(volume) });
+    },
+    dispose() {
+      disposed = true;
+      host?.dispose();
+      host = undefined;
     },
   };
 }

@@ -150,6 +150,7 @@ export function readConfig() {
       speakLanguage: c.get<string>("speakLanguage", ""),
       languageVoices: c.get<Record<string, string>>("languageVoices", {}),
       qwen3DaemonScript: path.join(runtime.context.extensionPath, "assets", "qwen3_daemon.py"),
+      systemHostScript: path.join(runtime.context.extensionPath, "assets", "sapi_host.ps1"),
       qwen3VoicesDir: qwen3VoicesDir(runtime.context.globalStorageUri.fsPath),
       chatterboxVoice: c.get<string>("chatterbox.voice", "default"),
       chatterboxRuntime: c.get<string>("chatterbox.runtime", "auto"),

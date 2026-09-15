@@ -60,6 +60,8 @@ export interface SpeechConfig {
   pauseScale: number;
   /** Path to the bundled qwen3_daemon.py. */
   qwen3DaemonScript: string;
+  /** The persistent System.Speech host the built-in Windows voice speaks through (assets/sapi_host.ps1). */
+  systemHostScript: string;
   /** Directory holding cloned Qwen3 voice profiles (extension storage). */
   qwen3VoicesDir: string;
   /** Chatterbox: voice ("clone:<slug>" or "default") and its storage root. */

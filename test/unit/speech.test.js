@@ -24,6 +24,7 @@ const baseConfig = {
   qwen3Style: "",
   qwen3Runtime: "auto",
   qwen3DaemonScript: "/x",
+  systemHostScript: "/x",
   qwen3VoicesDir: "/x",
 };
 
