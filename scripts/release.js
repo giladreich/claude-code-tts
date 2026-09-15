@@ -127,17 +127,20 @@ function main(version) {
   fs.writeFileSync(changelogPath, changelog);
   // npm rewrites package.json and both version fields of the lockfile in
   // their own formatting; prettier then makes sure format:check agrees.
-  const npm = spawnSync("npm", ["version", version, "--no-git-tag-version"], {
-    cwd: root,
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+  // Through a shell on Windows: npm and npx are .cmd files there, which
+  // spawnSync cannot start on its own (ENOENT, and the stamp stopped at
+  // the changelog with nothing said). One command string then, as a shell
+  // takes it; every word in it is a fixed name or the validated version.
+  const tool = (cmd, args) =>
+    process.platform === "win32"
+      ? spawnSync([cmd, ...args].join(" "), { cwd: root, stdio: ["ignore", "ignore", "inherit"], shell: true })
+      : spawnSync(cmd, args, { cwd: root, stdio: ["ignore", "ignore", "inherit"] });
+  const npm = tool("npm", ["version", version, "--no-git-tag-version"]);
   if (npm.status !== 0) {
+    console.error(npm.error ? `npm version: ${npm.error.message}` : `npm version exited with ${npm.status}`);
     process.exit(npm.status ?? 1);
   }
-  spawnSync("npx", ["prettier", "--write", "package.json", "package-lock.json"], {
-    cwd: root,
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+  tool("npx", ["prettier", "--write", "package.json", "package-lock.json"]);
   console.log(
     [
       "",
