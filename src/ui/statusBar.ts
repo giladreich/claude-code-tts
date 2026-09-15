@@ -61,6 +61,42 @@ export function claimDownloadNotice(): () => void {
   };
 }
 
+/**
+ * The model weights a runtime is fetching, shown inside a flow's own
+ * notification: the message names what is being fetched with the bytes and
+ * percentage, the bar follows, and `afterFetch` takes over once it is all
+ * there. The generic notification stays away meanwhile. Returns what ends it.
+ */
+export function reportDownloadIn(
+  progress: vscode.Progress<{ message?: string; increment?: number }>,
+  words: { fetching: string; afterFetch: string }
+): () => void {
+  const release = claimDownloadNotice();
+  let reported = 0;
+  const tick = () => {
+    const p = downloading;
+    if (!p) {
+      if (reported === 0) {
+        progress.report({ message: `${words.fetching}...` });
+      }
+      return;
+    }
+    const done = fractionOf(p);
+    const percent = done === undefined ? 0 : Math.round(done * 100);
+    progress.report({
+      message: done !== undefined && done >= 0.999 ? words.afterFetch : `${words.fetching}: ${progressText(p)}`,
+      increment: Math.max(0, percent - reported),
+    });
+    reported = Math.max(reported, percent);
+  };
+  const ticker = setInterval(tick, 2000);
+  tick();
+  return () => {
+    clearInterval(ticker);
+    release();
+  };
+}
+
 /** The speech queue reports what it is doing; the status bar shows it. */
 export function noteSpeaking(isSpeaking: boolean): void {
   speaking = isSpeaking;

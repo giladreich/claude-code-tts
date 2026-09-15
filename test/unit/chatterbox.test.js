@@ -136,7 +136,7 @@ test(
       const dataHome = fakeUvTools(python ?? process.execPath);
       process.env.XDG_DATA_HOME = dataHome;
       assert.deepEqual(
-        missingTextPackages(storage),
+        missingTextPackages(storage).map((p) => p.spec),
         CHATTERBOX_TEXT_PACKAGES.map((p) => p.spec),
         "a runtime installed by the other setup carries none of them"
       );
@@ -145,7 +145,11 @@ test(
 
       const site = path.join(dataHome, "uv", "tools", "mlx-audio", "lib", "python3.12", "site-packages");
       fs.mkdirSync(path.join(site, "num2words"), { recursive: true });
-      assert.deepEqual(missingTextPackages(storage), ["nakdimon==0.2.1"], "one present, one still missing");
+      assert.deepEqual(
+        missingTextPackages(storage).map((p) => p.spec),
+        ["nakdimon==0.2.1"],
+        "one present, one still missing"
+      );
       fs.mkdirSync(path.join(site, "nakdimon"), { recursive: true });
       assert.deepEqual(missingTextPackages(storage), []);
       assert.equal(diacritizerReady(storage), true);
@@ -415,4 +419,63 @@ test("the pipeline keeps room for every chunk the queue is told to prepare", () 
   const pipeline = fs.readFileSync(path.join(ROOT, "src", "tts", "synthPlay.ts"), "utf8");
   assert.match(pipeline, /maxPrepared = Math\.max\(3, \(params\.lookahead \?\? 2\) \+ 1\)/);
   assert.match(pipeline, /prewarmed\.size >= maxPrepared/);
+});
+
+test("the diacritizer is installed without its dependency list, its runtime needs resolved with the engine", () => {
+  // uv refused chatterbox-tts 0.1.7 (numpy below 2 on Python 3.12) next to
+  // nakdimon 0.2.1 (numpy 2.1 in its list) with "no solution found", and no
+  // Chatterbox could be installed on Windows or Linux at all. The package
+  // runs on numpy 1.26, so it goes in bare, after everything else resolved.
+  const { CHATTERBOX_TEXT_PACKAGES, textPackageInstalls } = require("../../out/tts/chatterbox.js");
+  const steps = textPackageInstalls("py.exe", CHATTERBOX_TEXT_PACKAGES, ["chatterbox-tts==0.1.7", "setuptools<81"]);
+  assert.equal(steps.length, 2);
+  assert.ok(!steps[0].includes("--no-deps"));
+  assert.ok(steps[0].includes("chatterbox-tts==0.1.7") && steps[0].includes("num2words>=0.5.14"));
+  assert.ok(
+    steps[0].some((a) => a.startsWith("onnxruntime")) && !steps[0].some((a) => a.startsWith("nakdimon")),
+    "what nakdimon uses resolves with the engine; nakdimon itself does not"
+  );
+  assert.deepEqual(steps[1], ["pip", "install", "--python", "py.exe", "--no-deps", "nakdimon==0.2.1"]);
+  // A repair that only lacks num2words needs no bare install.
+  assert.equal(textPackageInstalls("py.exe", [{ spec: "num2words>=0.5.14" }]).length, 1);
+});
+
+test("the weights are cached once a snapshot has files and no download is left half done", () => {
+  // Designing a voice for a language the designer cannot read records it
+  // through Chatterbox, whose first start fetches gigabytes: the flow shows
+  // that as a download rather than as "recording", which needs to know.
+  const { chatterboxModelCached } = require("../../out/tts/chatterbox.js");
+  const { venvPython } = require("../../out/platform/platform.js");
+  const savedHome = process.env.HF_HOME;
+  const savedPref = process.env.XDG_DATA_HOME;
+  const storage = tmpDir("cv-storage-cbmodel-");
+  try {
+    process.env.XDG_DATA_HOME = tmpDir("cv-xdg-empty-");
+    const hfHome = tmpDir("cv-hf-");
+    process.env.HF_HOME = hfHome;
+    assert.equal(chatterboxModelCached(storage), false, "no runtime: nothing could load it");
+    // The PyTorch runtime, installed: its interpreter and the package on disk.
+    const venv = path.join(storage, "chatterbox-venv");
+    fs.mkdirSync(path.dirname(venvPython(venv)), { recursive: true });
+    fs.writeFileSync(venvPython(venv), "");
+    const site =
+      process.platform === "win32"
+        ? path.join(venv, "Lib", "site-packages")
+        : path.join(venv, "lib", "python3.12", "site-packages");
+    fs.mkdirSync(path.join(site, "chatterbox"), { recursive: true });
+    assert.equal(chatterboxModelCached(storage, "torch"), false, "installed, nothing fetched yet");
+    const model = path.join(hfHome, "hub", "models--ResembleAI--chatterbox");
+    fs.mkdirSync(path.join(model, "snapshots", "abc"), { recursive: true });
+    fs.mkdirSync(path.join(model, "blobs"), { recursive: true });
+    fs.writeFileSync(path.join(model, "blobs", "1234.incomplete"), "partial");
+    assert.equal(chatterboxModelCached(storage, "torch"), false, "a fetch half done is a fetch to come");
+    fs.rmSync(path.join(model, "blobs", "1234.incomplete"));
+    fs.writeFileSync(path.join(model, "snapshots", "abc", "t3.safetensors"), "weights");
+    assert.equal(chatterboxModelCached(storage, "torch"), true);
+  } finally {
+    if (savedHome === undefined) delete process.env.HF_HOME;
+    else process.env.HF_HOME = savedHome;
+    if (savedPref === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = savedPref;
+  }
 });

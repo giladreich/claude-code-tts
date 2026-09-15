@@ -26,6 +26,7 @@ import { findKokoroPython, kokoroReady } from "../tts/kokoro";
 import { piperAvailable } from "../tts/piper";
 import {
   CHATTERBOX_TEXT_PACKAGES,
+  textPackageInstalls,
   chatterboxReady,
   chatterboxRuntimePython,
   chatterboxVenv,
@@ -528,15 +529,15 @@ export async function ensureChatterboxText(subject?: string, asked = false): Pro
       cancellable: true,
     },
     async (_progress, token) => {
-      const r = await runUv(
-        uv,
-        ["pip", "install", "--python", python, ...missing],
-        (line) => runtime.output.appendLine(`[chatterbox text] ${line}`),
-        {
+      for (const args of textPackageInstalls(python, missing)) {
+        const r = await runUv(uv, args, (line) => runtime.output.appendLine(`[chatterbox text] ${line}`), {
           onCancel: (kill) => token.onCancellationRequested(kill),
+        });
+        if (!r.ok) {
+          return false;
         }
-      );
-      return r.ok;
+      }
+      return true;
     }
   );
   if (!ok || missingTextPackages(storage, pref).length > 0) {
@@ -612,24 +613,20 @@ export async function installChatterboxRuntime(ask: boolean): Promise<boolean> {
       cancellable: true,
     },
     async (progress, token) => {
+      // Pinned: an unpinned install would silently pull a future release
+      // into the user's environment. setuptools stays bounded rather than
+      // pinned because its watermarker only needs pkg_resources to exist.
+      const installs = textPackageInstalls(venvPython(venv), CHATTERBOX_TEXT_PACKAGES, [
+        ...(await torchIndexForThisMachine(true)),
+        "chatterbox-tts==0.1.7",
+        "setuptools<81",
+      ]);
       const steps: [string, string[]][] = [
         ["creating the environment", ["venv", venv, "--python", "3.12"]],
-        // Pinned: an unpinned install would silently pull a future release
-        // into the user's environment. setuptools stays bounded rather than
-        // pinned because its watermarker only needs pkg_resources to exist.
-        [
-          "downloading packages",
-          [
-            "pip",
-            "install",
-            "--python",
-            venvPython(venv),
-            ...(await torchIndexForThisMachine(true)),
-            "chatterbox-tts==0.1.7",
-            "setuptools<81",
-            ...CHATTERBOX_TEXT_PACKAGES.map((p) => p.spec),
-          ],
-        ],
+        ...installs.map((args, i): [string, string[]] => [
+          i === 0 ? "downloading packages" : "adding text preparation",
+          args,
+        ]),
       ];
       for (const [message, args] of steps) {
         progress.report({ message });

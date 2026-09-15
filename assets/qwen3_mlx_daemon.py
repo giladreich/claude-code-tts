@@ -27,6 +27,7 @@ import wave
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from reference import condensed_reference
 from speech_budget import expected_seconds
 from mlx_audio.tts.utils import load_model
 
@@ -52,7 +53,7 @@ TOP_P = float(cfg.get("top_p", 0.95))
 try:
     _warm = {"text": "Ready.", "lang_code": "english"}
     if clone:
-        _warm.update(ref_audio=clone["ref_audio"], ref_text=clone["ref_text"])
+        _warm.update(ref_audio=condensed_reference(clone["ref_audio"])[0], ref_text=clone["ref_text"])
     else:
         _warm["voice"] = "Ryan"
     for _ in model.generate(**_warm):
@@ -172,7 +173,7 @@ if _decoder is not None:
     if clone:
         try:
             _decoder_reset()
-            _prime_decoder((clone["ref_audio"], clone["ref_text"]))
+            _prime_decoder((condensed_reference(clone["ref_audio"])[0], clone["ref_text"]))
             _decoder_reset()
         except Exception as e:
             print(json.dumps({"prime_error": str(e)}), file=sys.stderr, flush=True)
@@ -313,7 +314,7 @@ def gen_kwargs(req, stream):
     ref_audio = req.get("ref_audio") or (clone or {}).get("ref_audio")
     ref_text = req.get("ref_text") or (clone or {}).get("ref_text")
     if ref_audio and ref_text:
-        kw["ref_audio"] = ref_audio
+        kw["ref_audio"] = _condensed(ref_audio)
         kw["ref_text"] = ref_text
     else:
         kw["voice"] = req.get("voice", "Ryan")
@@ -337,6 +338,18 @@ def gen_kwargs(req, stream):
 # takes the arguments this was written against; otherwise generate() as before.
 _ref_audio_cache = {}
 _icl_reported = {"done": False}
+_condensed_paths = {}
+
+
+def _condensed(ref_audio):
+    """The reference as the model should hear it: long pauses inside it shortened (see reference.py)."""
+    path = _condensed_paths.get(ref_audio)
+    if path is None:
+        path, note = condensed_reference(ref_audio)
+        if note:
+            print(note, file=sys.stderr, flush=True)
+        _condensed_paths[ref_audio] = path
+    return path
 
 
 def _loaded_reference(path):

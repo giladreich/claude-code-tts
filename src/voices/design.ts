@@ -21,8 +21,8 @@ import {
 } from "../language/language";
 import { passageFor } from "./passages";
 import { startersFor } from "./starters";
-import { chatterboxReady, renderWithChatterbox } from "../tts/chatterbox";
-import { ensureQwen3Runtime } from "../setup/setupFlows";
+import { chatterboxModelCached, chatterboxReady, renderWithChatterbox } from "../tts/chatterbox";
+import { ensureQwen3Runtime, installChatterboxRuntime } from "../setup/setupFlows";
 import {
   findQwen3MlxPython,
   findQwen3Python,
@@ -32,8 +32,7 @@ import {
   qwen3VoicesDir,
 } from "../tts/qwen3";
 import { explainPlatformError } from "../platform/platform";
-import { fractionOf, progressText } from "../platform/modelProgress";
-import { claimDownloadNotice, downloadProgress } from "../ui/statusBar";
+import { reportDownloadIn } from "../ui/statusBar";
 import { BACK, Back, inputWithBack, pickWithPreview } from "../ui/prompts";
 import { playWavFile } from "../tts/wavPlayers";
 import { normalizeReference, trimSilence } from "../tts/wav";
@@ -132,36 +131,14 @@ export function render(
         // The first design fetches the designer's own model, a wait of
         // minutes: this notification carries how far it is (the bytes, the
         // percentage, the bar) rather than pointing at the status bar.
-        const release = cached ? undefined : claimDownloadNotice();
-        let reported = 0;
-        const tick = () => {
-          const p = downloadProgress();
-          if (!p) {
-            if (reported === 0) {
-              progress.report({ message: "fetching its own model first (~4.2 GB, once)..." });
-            }
-            return;
-          }
-          const done = fractionOf(p);
-          const percent = done === undefined ? 0 : Math.round(done * 100);
-          progress.report({
-            message:
-              done !== undefined && done >= 0.999
-                ? "model fetched; loading it and rendering (about half a minute)..."
-                : `fetching its own model, ${progressText(p)}`,
-            increment: Math.max(0, percent - reported),
-          });
-          reported = Math.max(reported, percent);
-        };
-        const ticker = cached ? undefined : setInterval(tick, 2000);
-        if (!cached) {
-          tick();
-        }
+        const stopReporting = cached
+          ? undefined
+          : reportDownloadIn(progress, {
+              fetching: "fetching its own model first (~4.2 GB, once)",
+              afterFetch: "model fetched; loading it and rendering (about half a minute)...",
+            });
         const finish = (result: { ok: boolean; error?: string }) => {
-          if (ticker) {
-            clearInterval(ticker);
-          }
-          release?.();
+          stopReporting?.();
           resolve(result);
         };
         const cfg = { model_id: snapshot ?? id, instruct, text: passage, language, out };
@@ -313,6 +290,24 @@ export async function designVoiceFlow(
   const renderCode = designRendersNatively(code) ? code : "en";
   const language = QWEN3_LANGUAGE_BY_CODE[renderCode] ?? "English";
   const passage = passageFor(renderCode);
+
+  // The re-recording is what gives the voice its accent in the language it
+  // is for, and Chatterbox is what does it: asked for and installed now,
+  // before minutes of rendering, rather than found missing after them,
+  // when all that was left was to keep the borrowed reference and say so.
+  if (renderCode !== code && !chatterboxReady(context.globalStorageUri.fsPath)) {
+    const installed = await installChatterboxRuntime(true);
+    if (!installed) {
+      const go = await vscode.window.showWarningMessage(
+        `Claude Code TTS: without Chatterbox the reference stays the ${languageName(renderCode)} recording, and the voice speaks ${languageName(code)} with a ${languageName(renderCode)} accent for good. Design it that way?`,
+        { modal: true },
+        "Design anyway"
+      );
+      if (go !== "Design anyway") {
+        return undefined;
+      }
+    }
+  }
 
   // 4.2 GB is not something to start behind a progress bar someone may not
   // be watching. Asked once: after the first design the model is on disk and
@@ -475,21 +470,41 @@ export async function designVoiceFlow(
     let referenceLanguage = renderCode;
     if (renderCode !== code) {
       await prepareText?.(code!);
+      const runtimePref = vscode.workspace.getConfiguration("claudeCodeTts").get<string>("chatterbox.runtime", "auto");
+      // The first recording fetches Chatterbox's own weights, minutes of
+      // waiting that used to pass under "recording the voice": the
+      // notification says what is being fetched and why, and how far it is
+      // (bytes, percentage, bar), as the other downloads do.
+      const cached = chatterboxModelCached(context.globalStorageUri.fsPath, runtimePref);
       const spoken = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: `Claude Code TTS: recording the voice in ${languageName(code!)}...`,
+          title: `Claude Code TTS: recording the voice in ${languageName(code!)}`,
         },
-        () =>
-          renderWithChatterbox({
-            globalStoragePath: context.globalStorageUri.fsPath,
-            daemonScript: path.join(context.extensionPath, "assets", "chatterbox_daemon.py"),
-            runtime: vscode.workspace.getConfiguration("claudeCodeTts").get<string>("chatterbox.runtime", "auto"),
-            text: passageFor(code),
-            language: code!,
-            refWav: tmpWav,
-            outWav: `${tmpWav}.native.wav`,
-          })
+        async (progress) => {
+          let stopReporting: (() => void) | undefined;
+          if (cached) {
+            progress.report({ message: "loading the model and recording (about a minute)..." });
+          } else {
+            stopReporting = reportDownloadIn(progress, {
+              fetching: `Chatterbox, which speaks ${languageName(code!)}, fetches its model first (~2.5 GB, once)`,
+              afterFetch: "model fetched; loading it and recording...",
+            });
+          }
+          try {
+            return await renderWithChatterbox({
+              globalStoragePath: context.globalStorageUri.fsPath,
+              daemonScript: path.join(context.extensionPath, "assets", "chatterbox_daemon.py"),
+              runtime: runtimePref,
+              text: passageFor(code),
+              language: code!,
+              refWav: tmpWav,
+              outWav: `${tmpWav}.native.wav`,
+            });
+          } finally {
+            stopReporting?.();
+          }
+        }
       );
       if (spoken && trimSilence(`${tmpWav}.native.wav`).seconds >= 4) {
         normalizeReference(`${tmpWav}.native.wav`);

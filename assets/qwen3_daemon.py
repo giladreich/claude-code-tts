@@ -28,6 +28,7 @@ import torch
 from qwen_tts import Qwen3TTSModel
 
 import qwen3_fast
+from reference import condensed_reference
 from speech_budget import expected_seconds
 
 cfg = json.loads(sys.argv[1])
@@ -51,7 +52,12 @@ def prompt_for(ref_audio, ref_text):
     if key in prompts:
         prompts.move_to_end(key)
         return prompts[key]
-    prompts[key] = model.create_voice_clone_prompt(ref_audio=ref_audio, ref_text=ref_text)
+    # Long pauses inside the reference made the model end sentences after
+    # two frames (see reference.py); the model hears a condensed copy.
+    audio, note = condensed_reference(ref_audio)
+    if note:
+        print(note, file=sys.stderr, flush=True)
+    prompts[key] = model.create_voice_clone_prompt(ref_audio=audio, ref_text=ref_text)
     while len(prompts) > PROMPT_CACHE:
         prompts.popitem(last=False)
         release_memory()

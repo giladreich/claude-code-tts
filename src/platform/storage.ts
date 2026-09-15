@@ -95,7 +95,7 @@ const OUR_WHISPER = [
  * this screen until now: the MLX and the PyTorch runtime each download their
  * own copy, so a machine that tried both keeps both forever.
  */
-const CHATTERBOX_MODELS: Record<"mlx" | "torch", string[]> = {
+export const CHATTERBOX_MODELS: Record<"mlx" | "torch", string[]> = {
   mlx: ["mlx-community/chatterbox-multilingual-v3"],
   torch: ["ResembleAI/chatterbox"],
 };
