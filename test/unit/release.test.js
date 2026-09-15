@@ -120,3 +120,37 @@ test("packaging always goes through the script that writes that README", () => {
   }
   assert.match(pkg.scripts.package, /marketplace-readme\.js && vsce package --readme-path/, "the script does both");
 });
+
+// The release script: what it stamps, checked without a repository.
+const { stampChangelog, newer } = require(path.join(ROOT, "scripts", "release.js"));
+
+test("the lockfile carries the same version as package.json, in both places", () => {
+  // `vsce publish minor` and a hand-edited package.json leave the lockfile
+  // behind; the 1.1.0 release shipped with a lockfile still saying 1.0.1.
+  const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[""].version, pkg.version);
+});
+
+test("releasing renames the Unreleased section to the version", () => {
+  const md = "# Changelog\n\n## [Unreleased]\n\n- new\n\n## [1.0.0]\n\n- old\n";
+  assert.equal(stampChangelog(md, "1.0.1"), "# Changelog\n\n## [1.0.1]\n\n- new\n\n## [1.0.0]\n\n- old\n");
+  assert.equal(stampChangelog("## Unreleased\n\n- new\n", "1.0.1"), "## [1.0.1]\n\n- new\n");
+});
+
+test("releasing leaves a changelog that already has the section, and refuses one with nothing to say", () => {
+  const ready = "## [1.0.1]\n\n- new\n\n## [1.0.0]\n\n- old\n";
+  assert.equal(stampChangelog(ready, "1.0.1"), ready);
+  assert.throws(() => stampChangelog("## [1.0.0]\n\n- old\n", "1.0.1"), /no "## \[Unreleased\]" section/);
+  assert.throws(() => stampChangelog("## [Unreleased]\n\n## [1.0.0]\n\n- old\n", "1.0.1"), /nothing under/);
+  assert.throws(() => stampChangelog("## [1.0.1]\n\n## [1.0.0]\n\n- old\n", "1.0.1"), /nothing in it/);
+});
+
+test("a release must be newer than the current version", () => {
+  assert.ok(newer("1.1.1", "1.1.0"));
+  assert.ok(newer("2.0.0", "1.9.9"));
+  assert.ok(newer("1.1.0", "1.1.0-beta"));
+  assert.ok(!newer("1.1.0", "1.1.0"));
+  assert.ok(!newer("1.0.9", "1.1.0"));
+  assert.ok(!newer("1.1.0-beta", "1.1.0"));
+});

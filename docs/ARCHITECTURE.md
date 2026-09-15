@@ -336,11 +336,11 @@ Sizes in practice: a Qwen3 0.6B checkpoint 2.3 GB (1.7B: 4.2 GB), Chatterbox wei
 
 ## Tests and CI
 
-`npm run verify` is the gate before anything is called done: `format:check` (Prettier), `lint` (ESLint), `compile` (tsc), then `npm test`; `vscode:prepublish` runs the same chain, so packaging cannot ship unformatted or unlinted code. `npm test` = `node --test` over `test/unit` and `test/integration` (sequential) plus `test/activate-smoke.js`. Unit tests are pure or use fake model modules on `PYTHONPATH` and run on every platform; the integration tests compile the Swift helpers and play silently through CoreAudio, so they cover the macOS playback path only and skip themselves elsewhere. CI runs format and lint in their own job (seconds, nothing to install), the unit suite on Linux and Windows (where the drive-letter scoping, hook matching, venv layout and sound library differ) and the integration suite on macOS, and packages the .vsix only after style, unit and windows pass.
+`npm run verify` is the gate before anything is called done: `format:check` (Prettier), `lint` (ESLint), `compile` (tsc), then `npm test`; `vscode:prepublish` runs the same chain, so packaging cannot ship unformatted or unlinted code. `npm test` = `node --test` over `test/unit` and `test/integration` (sequential) plus `test/activate-smoke.js`. Unit tests are pure or use fake model modules on `PYTHONPATH` and run on every platform; the integration tests compile the Swift helpers and play silently through CoreAudio, so they cover the macOS playback path only and skip themselves elsewhere. CI runs on every pull request (they target `dev`) and by hand from Actions, never on a push; it runs format and lint in their own job (seconds, nothing to install), the unit suite on Linux and Windows (where the drive-letter scoping, hook matching, venv layout and sound library differ) and the integration suite on macOS, and packages the .vsix only after style, unit and windows pass.
 
 ```mermaid
 flowchart LR
-    PR["push / pull request"] --> CI0["ubuntu: format check<br/>and lint"]
+    PR["pull request to dev,<br/>or run by hand"] --> CI0["ubuntu: format check<br/>and lint"]
     PR --> CI1["ubuntu: compile,<br/>unit tests, smoke"]
     PR --> CIW["windows: compile,<br/>unit tests, smoke"]
     PR --> CI2["macos: player and<br/>pipeline tests"]

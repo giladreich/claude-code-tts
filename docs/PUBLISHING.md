@@ -10,18 +10,41 @@ Set it up once, then a release is three commands.
 
 ## Release
 
-1. Add the new section to [CHANGELOG.md](../CHANGELOG.md), headed `## [1.1.0]`
-   (a date after it is fine, the brackets are optional). The workflow pulls the
-   release notes out by that heading, and writes "See CHANGELOG.md." if it finds
-   none; `test/unit/release.test.js` fails when the version in `package.json`
-   has no section.
-2. Set the same version in `package.json` and `package-lock.json`.
-3. Commit, tag, push:
+Work lands on `dev` in commits that are each one change, pull requests
+included: they target `dev`, and CI runs on each one, while nothing runs on a
+push. `main` only ever moves to a release, so it is always the last thing
+shipped and what a bug report is read against. A release is a commit of its
+own on `dev` that carries the notes and the version and nothing else, then
+`dev` fast-forwarded into `main` and tagged there. What a change
+means for the person using the extension goes under a `## [Unreleased]`
+heading at the top of [CHANGELOG.md](../CHANGELOG.md), either with the commit
+or when the release is written; a section already headed with a version has
+shipped and is not added to.
+
+1. `npm run release -- 1.1.1` renames the `## [Unreleased]` heading to the
+   version and sets it in `package.json` and `package-lock.json`. It refuses a
+   version that is not newer, one that already has a tag, uncommitted changes
+   to anything but the changelog, and a changelog with nothing to release, in which case
+   it prints the commits since the last tag to write the notes from. The
+   workflow pulls the release notes out by the `## [1.1.1]` heading (a date
+   after it is fine, the brackets are optional) and writes "See CHANGELOG.md."
+   if it finds none; `test/unit/release.test.js` fails when the version in
+   `package.json` has no section or the lockfile disagrees.
+2. Read the diff, `npm run verify`, and try the packaged `.vsix` in a real
+   session when the change warrants it.
+3. Commit the stamp on its own on `dev`, fast-forward `main` to it, tag, push:
 
 ```sh
-git tag 1.1.0
-git push origin main --tags
+git commit -am "Release 1.1.1."
+git checkout main && git merge --ff-only dev && git tag 1.1.1
+git push origin main dev --tags && git checkout dev
 ```
+
+`--ff-only` refuses when `main` has a commit `dev` does not (a hotfix made on
+`main`); rebase `dev` onto `main` first, so that the history stays one line.
+The tag is what starts the release workflow, and that run is the complete
+suite on macOS before anything is built, so a release is tested even though a
+push is not.
 
 Tags carry no `v` prefix: the tag is the version exactly as `package.json`
 spells it, and the workflow refuses a tag that disagrees. The run publishes
@@ -32,8 +55,7 @@ to the GitHub release, and nothing is published.
 
 Avoid `vsce publish minor` and friends: they bump `package.json` without
 touching `package-lock.json` or the changelog. `test/unit/release.test.js`
-catches the missing changelog section; nothing checks the lockfile, so set it
-by hand.
+catches both, but only once the tests run.
 
 ## One-time setup
 
@@ -263,4 +285,4 @@ npx ovsx create-namespace giladreich -p <token>
 | The sign-in step finds no matching federated credential | The subject does not match. The credential must be scoped to the **environment** `release` (step 3), because the release runs on a tag. |
 | `Set the AZURE_CLIENT_ID and AZURE_TENANT_ID repository variables` | The run stopped before signing in. Step 4. |
 | The id step fails before printing anything | The sign-in failed: the environment (step 5) or the federated credential (step 3) does not match. |
-| `Version number must increase each time an extension is published` | That version is already on the Marketplace. Bump `package.json`, the lockfile and the changelog, then tag again. |
+| `Version number must increase each time an extension is published` | That version is already on the Marketplace. Release the next version (`npm run release -- <next>`) and tag that. |

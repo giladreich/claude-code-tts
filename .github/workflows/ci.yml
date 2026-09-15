@@ -1,11 +1,15 @@
 name: CI
 
+# Runs on every pull request (they target dev; main moves only when a release
+# is cut from dev) and by hand from Actions for any branch. Nothing runs on a
+# push: a release is tested by the release workflow, which runs the whole
+# suite on the tag before anything is built.
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [dev]
+  workflow_dispatch:
 
-# A new push to the same branch supersedes the run before it.
+# A new push to the same pull request supersedes the run before it.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

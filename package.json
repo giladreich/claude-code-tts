@@ -893,6 +893,7 @@
     "lint": "eslint src test --no-warn-ignored",
     "lint:fix": "eslint src test --fix --no-warn-ignored",
     "package": "node scripts/marketplace-readme.js && vsce package --readme-path README.marketplace.md",
+    "release": "node scripts/release.js",
     "test": "node --test --test-concurrency=1 --test-timeout=120000 \"test/unit/*.test.js\" \"test/integration/*.test.js\" && node test/activate-smoke.js",
     "test:unit": "node --test --test-concurrency=1 --test-timeout=90000 \"test/unit/*.test.js\"",
     "verify": "npm run format:check && npm run lint && npm run compile && npm test",
