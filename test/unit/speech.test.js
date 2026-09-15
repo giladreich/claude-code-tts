@@ -690,3 +690,26 @@ test("an utterance carries the message it belongs to through coalescing, and an 
   q.stop();
   q.dispose();
 });
+
+test("an audition is spoken as the language of its sentence, stated or detected", async () => {
+  // A German voice auditioned with an English sentence and no language was
+  // read by Qwen3 as if the English were German.
+  const eng = fakeEngine(20);
+  const q = new SpeechQueue(
+    { ...baseConfig, autoLanguage: true },
+    () => {},
+    undefined,
+    () => eng
+  );
+  // Long enough for the detector; one short sentence is not, which is why
+  // the pickers state the language of a voice's sample rather than trust it.
+  q.preview("Hallo. Das ist die Stimme, die du entworfen hast. Claude wird ab jetzt so klingen.", "clone:de");
+  await until(() => eng.events.length === 1, 2000);
+  assert.equal(eng.events[0].language, "de", "detected from the sentence");
+  await sleep(40);
+  q.preview("This voice will read English messages.", "clone:de", undefined, undefined, undefined, undefined, "fr");
+  await until(() => eng.events.length === 2, 2000);
+  assert.equal(eng.events[1].language, "fr", "a stated language wins");
+  q.stop();
+  q.dispose();
+});

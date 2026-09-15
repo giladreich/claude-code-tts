@@ -144,12 +144,19 @@ export function inputWithBack(
      * length and size an export range comes to, updated as it is typed.
      */
     hint?: (value: string) => string | undefined;
+    /** Hide when the window loses focus; the default keeps the box (see below). */
+    ignoreFocusOut?: boolean;
   },
   back = false
 ): Promise<string | Back | undefined> {
   return new Promise((resolve) => {
     const box = vscode.window.createInputBox();
     box.prompt = opts.prompt;
+    // Text is typed here, and often pasted from elsewhere: switching to
+    // another window to copy it took the focus, the box closed as "back",
+    // the step before it opened and closed the same way, and someone who
+    // pasted a voice description found themselves at the language list.
+    box.ignoreFocusOut = opts.ignoreFocusOut ?? true;
     if (opts.title) {
       box.title = opts.title;
     }
@@ -455,6 +462,8 @@ export function livePreviewPicker<T extends vscode.QuickPickItem>(opts: {
         inVoice?: string;
         file?: string;
         volume?: number;
+        /** The language the sample is in, when the caller knows it. */
+        language?: string;
       }
     | undefined;
   accept: (item: T) => Promise<void> | void;
@@ -519,7 +528,8 @@ export function livePreviewPicker<T extends vscode.QuickPickItem>(opts: {
             qp.busy = false;
           },
           s.engine,
-          s.inVoice
+          s.inVoice,
+          s.language
         );
       }, opts.debounceMs ?? 250);
     });

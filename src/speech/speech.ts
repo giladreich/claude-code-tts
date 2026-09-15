@@ -372,7 +372,9 @@ export class SpeechQueue {
     rate?: number,
     onDone?: () => void,
     engine?: SpeechConfig["engine"],
-    inVoice?: string
+    inVoice?: string,
+    /** The language of the sample; detected from it when not stated. */
+    language?: string
   ): void {
     // A voice owned by another engine (a Piper model auditioned while
     // Chatterbox is active) has to be spoken by that engine, or the main one
@@ -401,12 +403,16 @@ export class SpeechQueue {
       }
     }
 
+    // Stated or detected, never left out: a Qwen3 clone told nothing falls
+    // back to the language it was made for, and a German voice auditioned
+    // with an English sentence then read English as if it were German.
     const req: SpeakRequest = {
       text,
       wpm: rate ?? this.config.rate,
       voice,
       volume: this.config.volume,
       preview: true,
+      language: language ?? (this.config.autoLanguage ? detectLanguage(text) : undefined),
     };
     const speaker: Speaker = backend.speak(
       req,

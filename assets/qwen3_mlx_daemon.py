@@ -423,7 +423,7 @@ while True:
             write_wav(tail, np.zeros(int(sr * END_BREATH * pause_scale), dtype=np.float32), sr)
             print(json.dumps({"id": rid, "part": tail, "final": True}), flush=True)
             gen = time.time() - t_gen
-            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "gen_s": round(gen, 2), "audio_s": round(produced, 2),
+            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "language": str(req.get("language", "auto")).lower(), "gen_s": round(gen, 2), "audio_s": round(produced, 2),
                               "rtf": round(gen / max(produced, 0.01), 2), "text": req["text"][:40]}), file=sys.stderr, flush=True)
             print(json.dumps({"id": rid, "ok": True, "gen_s": round(gen, 2), "audio_s": round(produced, 2)}), flush=True)
         else:
@@ -437,7 +437,7 @@ while True:
             write_wav(req["out"], trim_trailing(trim_leading(audio, sr), sr), sr, gain)
             gen = time.time() - t_gen
             audio_s = audio.size / sr
-            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "gen_s": round(gen, 2), "audio_s": round(audio_s, 2),
+            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "language": str(req.get("language", "auto")).lower(), "gen_s": round(gen, 2), "audio_s": round(audio_s, 2),
                               "rtf": round(gen / max(audio_s, 0.01), 2), "text": req["text"][:40]}), file=sys.stderr, flush=True)
             print(json.dumps({"id": rid, "ok": True, "gen_s": round(gen, 2), "audio_s": round(audio_s, 2)}), flush=True)
     except Exception as e:  # keep serving after a bad request
