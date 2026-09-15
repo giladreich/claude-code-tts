@@ -194,7 +194,7 @@ The file is named after the date and time and offered in your Downloads folder; 
 | System voice | 0 | instant |
 | Kokoro runtime and model | 360 MB | first words in about half a second; faster than realtime |
 | Piper voice | 60-115 MB each | faster than realtime |
-| Qwen3 0.6B | 2.3 GB | about 0.7x realtime on Apple Silicon (MLX), streamed |
+| Qwen3 0.6B | 2.3 GB | about 0.7x realtime on Apple Silicon (MLX) and 0.75x on a laptop with an NVIDIA GPU (PyTorch), streamed |
 | Qwen3 1.7B | 4.2 GB | about 1.0x realtime, closer to the reference |
 | Qwen3 VoiceDesign | 4.2 GB | only while designing a voice |
 | Chatterbox (MLX) | 3.0 GB | first words in about 2.5 s; whole chunks at 0.6-0.7x realtime |

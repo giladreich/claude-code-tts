@@ -195,3 +195,25 @@ test("the notice about Windows blocking the neural engines names what still work
   assert.doesNotMatch(notice, /turn(ed)? (it )?off/i, "never an instruction to change a security setting");
   assert.doesNotMatch(notice, /cannot be turned on again/, "not a claim about Windows that current builds contradict");
 });
+
+test("off Apple Silicon a machine of any size is pointed at the engine that keeps up, unless it cannot say the language", () => {
+  const { recommendEngine } = require("../../out/setup/onboarding.js");
+  const laptop = { platform: "win32", arch: "x64", cores: 32, memoryGb: 64 };
+  const gaming = { ...laptop, nvidia: true };
+  const mac = { platform: "darwin", arch: "arm64", cores: 10, memoryGb: 32 };
+  assert.equal(
+    recommendEngine(["en"], laptop).engine,
+    "kokoro",
+    "without an NVIDIA GPU the PyTorch engines run slower than speech"
+  );
+  assert.match(recommendEngine(["en"], laptop).reason, /keeps up/);
+  assert.equal(
+    recommendEngine(["en"], gaming).engine,
+    "qwen3",
+    "a laptop with an NVIDIA GPU runs Qwen3 faster than speech"
+  );
+  assert.match(recommendEngine(["en"], gaming).reason, /NVIDIA/);
+  assert.equal(recommendEngine(["en"], mac).engine, "qwen3", "MLX streams faster than realtime");
+  assert.equal(recommendEngine(["ko"], laptop).engine, "kokoro", "a language the light engine speaks");
+  assert.equal(recommendEngine(["de"], laptop).engine, "qwen3", "one it does not: the voice has to be right first");
+});

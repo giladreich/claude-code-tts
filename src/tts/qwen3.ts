@@ -150,6 +150,15 @@ export function profileDirOf(voicesDir: string, slug: string): string {
  */
 export const TRASH_DIR = ".trash";
 
+/**
+ * How many chunks ahead the PyTorch runtime prepares: its daemon generates
+ * what is queued together in one pass (assets/qwen3_daemon.py, MAX_BATCH),
+ * so the deeper the queue, the more of a message is made at the cost of
+ * one chunk. One less than the daemon's batch: the chunk being spoken and
+ * these fill it exactly.
+ */
+const QWEN3_TORCH_LOOKAHEAD = 7;
+
 export interface TrashedProfile {
   /** Directory name inside the trash: "<slug>-<timestamp>". */
   entry: string;
@@ -659,16 +668,24 @@ export function qwen3Backend(
 
   const base = synthesizeThenPlayBackend({
     name: "qwen3",
+    // The PyTorch daemon generates the requests queued together in one
+    // pass, at the cost of one (measured: seven sentences in 1.1x the time
+    // of one), so what is prepared ahead is where its speed comes from: a
+    // whole message's chunks at once, where two ahead left the rest to be
+    // generated one by one while the sentence before each waited.
+    lookahead: runtime === "torch" ? QWEN3_TORCH_LOOKAHEAD : undefined,
     // Clones may speak faster or slower than the presets; a per-profile pace
     // factor (Manage Voices) shifts what "natural" means for that voice.
     naturalWpm: 175 / (activeClone()?.pace ?? 1),
     // Measured on Apple Silicon (MLX): 0.6B ~0.7x realtime, 1.7B ~1.0x idle
-    // and slower under load. The PyTorch runtime measured 1.35-1.55x on a
-    // laptop with an NVIDIA GPU with the direct sampling in qwen3_fast.py, 2.7x through
-    // the reference generate() (it is bound by Python between tiny kernels,
-    // not by the GPU). The pipeline learns the real value as it goes, and
-    // keeps it: a machine that measured slower last week is still slower.
-    typicalRtf: runtime === "torch" ? (size === "1.7B" ? 2.5 : 1.5) : size === "1.7B" ? 1.15 : 0.75,
+    // and slower under load. The PyTorch runtime measured 0.72-0.80x on a
+    // laptop with an NVIDIA GPU with the code predictor replayed as CUDA graphs
+    // (qwen3_fast.py; 1.35-1.55x launching its steps one by one, 2.7x
+    // through the reference generate(): the loop is bound by Python between
+    // tiny kernels, not by the GPU). The 1.7B figure there is scaled, not
+    // measured. The pipeline learns the real value as it goes, and keeps
+    // it: a machine that measured slower last week is still slower.
+    typicalRtf: runtime === "torch" ? (size === "1.7B" ? 1.4 : 0.8) : size === "1.7B" ? 1.15 : 0.75,
     rememberedRtf: opts.speedMemory?.get(`qwen3:${size}:${runtime ?? "mlx"}`),
     onRtf: (rtf) => opts.speedMemory?.set(`qwen3:${size}:${runtime ?? "mlx"}`, rtf),
     synthesize(text, _wpm, voice, wavPath, urgent, language): SynthTask | undefined {
@@ -742,6 +759,9 @@ export function qwen3Backend(
           cancelled = true;
           r.cancel();
         },
+        // Only the PyTorch daemon generates requests together and takes
+        // the message; the MLX one has nothing to do with it.
+        hot: runtime === "torch" ? r.hot : undefined,
       };
     },
   });
@@ -749,6 +769,9 @@ export function qwen3Backend(
   return {
     ...base,
     name: runtime === "mlx" ? "qwen3 (mlx)" : "qwen3",
+    // The queue reads it from the backend; the pipeline above sizes its
+    // room for prepared chunks from the same number.
+    lookahead: runtime === "torch" ? QWEN3_TORCH_LOOKAHEAD : undefined,
     // Claude has started writing: load the model now, while it is still
     // thinking, instead of when the first sentence is already waiting.
     wake() {

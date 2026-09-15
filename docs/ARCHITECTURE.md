@@ -68,6 +68,7 @@ sequenceDiagram
     SQ->>BE: prewarm(chunk 2, background)
     BE->>DM: {id:1, text, stream:true, priority:1}
     BE->>DM: {id:2, text, stream:true, priority:0}
+    Note over DM: the PyTorch Qwen3 daemon generates both in one pass
     DM-->>BE: {id:1, part:"p0.wav", final:false}
     BE->>PL: {play:"p0.wav", id:7, rate:1.0, final:false}
     DM-->>BE: {id:1, part:"p1.wav", final:false}
@@ -77,6 +78,7 @@ sequenceDiagram
     PL-->>BE: {done:true, id:7}
     BE->>SQ: onDone
     SQ->>BE: speak(chunk 2) attaches to the prewarmed session
+    BE->>DM: {hot:2}
 ```
 
 ## Which engine, which runtime
@@ -97,7 +99,7 @@ flowchart TD
     F -->|yes| G{"Apple Silicon<br/>with mlx-audio?"}
     G -->|yes| MLX["qwen3_mlx_daemon.py<br/>streaming, ~0.7x realtime"]
     G -->|no| H{"Python with qwen_tts?"}
-    H -->|yes| TORCH["qwen3_daemon.py<br/>PyTorch, streaming, ~1.4x"]
+    H -->|yes| TORCH["qwen3_daemon.py<br/>PyTorch, streaming, batched,<br/>CUDA graphs, ~0.75x on a laptop NVIDIA GPU"]
     H -->|no| WARN["warning with the install command"]
     A --> J{chatterbox}
     J -->|yes| K{"Apple Silicon with the<br/>mlx-audio uv tool?"}
@@ -240,10 +242,10 @@ Streaming needs a persistent player, one that takes the parts of an utterance ba
 | `assets/wavplayer.swift` | Swift (AVAudioEngine) | `audio.ts`, compiled once into globalStorage/bin | Gapless streaming playback, live rate and volume, pause, device-change recovery, idle device release, underrun logging |
 | `assets/sapi_host.ps1` | Windows PowerShell 5.1 (System.Speech) | `system.ts` on Windows | The built-in Windows voice: one process for the session with a synthesizer speaking and another rendering exports, JSON lines in and out; cancel, pause and resume, live volume. A process per sentence cost a second or two of silence between sentences |
 | `assets/wav_host.ps1` | Windows PowerShell 5.1 (winmm waveOut through a C# class it compiles; WPF MediaPlayer for files that are not 16-bit PCM) | `audio.ts` on Windows without ffplay | The Swift player's protocol: play, appended parts queued as PCM buffers on the device (2-3 ms between them, where a file per part through MediaPlayer left 35-250 ms), stop, pause, resume, volume; no time-stretch. A process per file cost about 850 ms of silence per sentence; the process is started at activation and kept, since starting it costs 1.5-2 s |
-| `assets/qwen3_fast.py` | Python (torch) | `qwen3_daemon.py` | Direct sampling of a frame's codebooks in place of a generation pass per frame, and the talker tap that reports each frame as it is made, which is what the daemon streams from |
+| `assets/qwen3_fast.py` | Python (torch) | `qwen3_daemon.py` | Direct sampling of a frame's codebooks in place of a generation pass per frame, replayed as a CUDA graph per batch size (the loop is bound by kernel launches: 96 ms a frame became 17); the talker tap that reports each frame as it is made, which is what the daemon streams from; and the codec decoder run with its state kept between parts (`StreamDecoder`), so a part costs its own frames rather than the whole prefix and the voice reference |
 | `assets/kokoro_daemon.py` | Python (sherpa-onnx) | `kokoro.ts` | Kokoro synthesis, streaming per sentence with reader pauses, cancel, priority |
 | `assets/qwen3_mlx_daemon.py` | Python (mlx-audio) | `qwen3.ts` on Apple Silicon | Qwen3 presets and clones on MLX, streaming, runaway cutoff, per-profile gain. Streaming primes the vocoder with the reference codes once per reference and restores that state before every stream, because a cold vocoder opens an octave high and settles over half a second. Clones go through the clone path directly with the daemon's repetition penalty (1.1; the public `generate()` forces 1.5, which measured flatter and noisier than the speaker) |
-| `assets/qwen3_daemon.py` | Python (qwen-tts, PyTorch) | `qwen3.ts` elsewhere | Same protocol, non-streaming |
+| `assets/qwen3_daemon.py` | Python (qwen-tts, PyTorch) | `qwen3.ts` elsewhere | Same protocol; streams through the frame tap, and generates the requests queued together in one pass (the talker's step costs the same for eight sequences as for one), the one being played streaming a part a second and the rest a part every three until `hot` says one is being played |
 | `assets/chatterbox_mlx_daemon.py` | Python (mlx-audio) | `chatterbox.ts` on Apple Silicon | Chatterbox v3 cloning in 23 languages, runaway cutoff; the chunk about to play is streamed and chunks generated ahead stay whole (whole costs about 0.65x realtime against 1.1x streamed); also voice conversion (`{convert}` requests re-voice a WAV into a cloned voice through the S3 tokenizer and s3gen) |
 | `assets/diacritize.py` | Python, imported by both Chatterbox daemons | the daemons, per request | vowel marks for the writing systems that omit them (Nakdimon, MIT) and spoken numbers (num2words) before generation. Where the vowels are not written the model guesses them and says other words: CER 0.294 becomes 0.076. Identifiers, versions and `file:line` references are left as written. Degrades to the original text when the packages are absent, and the engine says so once and offers to install them: the runtime is the same `mlx-audio` tool the Qwen3 setup installs, so an engine that works at all is not evidence that these are there |
 | `assets/speech_budget.py` | Python, imported by every generator | the daemons and the voice designer | How long text takes to say, which is the runaway cutoff. Counts Chinese, Japanese and Korean by character: they are written without spaces, so counting words scored a passage as one and cut the speech off after a second. One module because that fix had to be made three times and still missed a fourth copy |
@@ -268,6 +270,8 @@ Daemons (one JSON object per line):
 <- {"id": 1, "part": "/tmp/x.p4.wav", "final": true}    (short silence: breath + end marker)
 <- {"id": 1, "ok": true}                                 or {"id": 1, "ok": false, "error": "..."}
 -> {"cancel": 1}                                         aborts a queued or running request
+-> {"hot": 2}                                            the request is being played now (PyTorch Qwen3: its row
+                                                         of the batch streams a part a second from here on)
 ```
 
 Player:

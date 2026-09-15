@@ -87,7 +87,7 @@ def reader():
         with cv:
             if "cancel" in req:
                 mark_cancelled(req["cancel"])
-            else:
+            elif "id" in req:  # anything else is a message this daemon does not speak
                 req["_queued_at"] = time.time()
                 (urgent if req.get("priority") else background).append(req)
             cv.notify()

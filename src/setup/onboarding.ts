@@ -12,8 +12,10 @@
  * Which engine that install lands on is decided here rather than left to the
  * reader of a comparison table.
  */
+import * as fs from "fs";
 import * as os from "os";
 import { ENGINE_LANGUAGES, ProfileEngine } from "../language/language";
+import { hasCommand } from "../platform/platform";
 
 export type RecommendedEngine = "qwen3" | "chatterbox" | "kokoro";
 
@@ -41,6 +43,8 @@ export interface Machine {
   arch: string;
   cores: number;
   memoryGb: number;
+  /** An NVIDIA driver is installed: the PyTorch engines can run on its GPU. */
+  nvidia?: boolean;
 }
 
 export function thisMachine(): Machine {
@@ -49,6 +53,9 @@ export function thisMachine(): Machine {
     arch: process.arch,
     cores: os.cpus().length || 1,
     memoryGb: os.totalmem() / 1024 ** 3,
+    // Read from disk, never asked of nvidia-smi: this runs on the activation
+    // path, and nothing there may start a process.
+    nvidia: hasCommand("nvidia-smi") || fs.existsSync("/proc/driver/nvidia/version"),
   };
 }
 
@@ -114,6 +121,26 @@ export function recommendEngine(languages: string[], machine?: Machine): Recomme
         "It is the natural-sounding engine this machine can run comfortably: one download, no Python, and it keeps up while it speaks.",
     };
   }
+  // Off Apple Silicon the cloning engines run on PyTorch. Qwen3 keeps up
+  // there on an NVIDIA GPU (0.75x realtime measured on a laptop with an NVIDIA GPU,
+  // with the code predictor as CUDA graphs and the chunks of a message
+  // generated together) and not without one (the CPU build ran 8x slower
+  // than speech); Chatterbox measured 2.4x slower even on the GPU. So a
+  // machine with an NVIDIA driver is sent to Qwen3, the others to Kokoro,
+  // which keeps up everywhere; the cloning engines stay a choice away.
+  if (
+    !beyondReach &&
+    machine &&
+    !(machine.platform === "darwin" && machine.arch === "arm64") &&
+    !machine.nvidia &&
+    wanted.every((code) => ENGINE_LANGUAGES.kokoro.includes(code))
+  ) {
+    return {
+      engine: "kokoro",
+      reason:
+        "It keeps up with Claude on any machine: the cloning engines run on PyTorch here and keep up only on an NVIDIA GPU, which this machine does not have. They stay available for a voice of your own.",
+    };
+  }
   return beyondReach
     ? {
         engine: "chatterbox",
@@ -122,7 +149,10 @@ export function recommendEngine(languages: string[], machine?: Machine): Recomme
       }
     : {
         engine: "qwen3",
-        reason: "It is the most natural voice here, and the only one that can speak as a voice you record or design.",
+        reason:
+          machine?.nvidia && !(machine.platform === "darwin" && machine.arch === "arm64")
+            ? "It is the most natural voice here and speaks as a voice you record or design; on this machine's NVIDIA GPU it generates faster than it speaks."
+            : "It is the most natural voice here, and the only one that can speak as a voice you record or design.",
       };
 }
 

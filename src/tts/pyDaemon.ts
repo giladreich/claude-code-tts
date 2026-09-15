@@ -205,10 +205,11 @@ export class PyTtsDaemon {
   request(
     payload: Record<string, unknown>,
     onPart?: (file: string, final: boolean) => void
-  ): { promise: Promise<any>; cancel: () => void } {
+  ): { promise: Promise<any>; cancel: () => void; hot: () => void } {
     const id = this.nextId++;
     let sent = false;
     let cancelled = false;
+    let wanted = false;
     const promise = this.ready.then(
       () =>
         new Promise<any>((resolve, reject) => {
@@ -222,6 +223,9 @@ export class PyTtsDaemon {
           this.touch(id);
           sent = true;
           this.proc.stdin!.write(JSON.stringify({ id, ...payload }) + "\n");
+          if (wanted) {
+            this.proc.stdin!.write(JSON.stringify({ hot: id }) + "\n");
+          }
         })
     );
     return {
@@ -234,6 +238,20 @@ export class PyTtsDaemon {
         if (sent && this.alive && this.pending.has(id)) {
           try {
             this.proc.stdin!.write(JSON.stringify({ cancel: id }) + "\n");
+          } catch {}
+        }
+      },
+      // The request is being played now: a daemon that generates several
+      // requests together streams this one's audio from here on (see
+      // assets/qwen3_daemon.py); the others take no notice of the message.
+      hot: () => {
+        if (wanted || cancelled) {
+          return;
+        }
+        wanted = true;
+        if (sent && this.alive && this.pending.has(id)) {
+          try {
+            this.proc.stdin!.write(JSON.stringify({ hot: id }) + "\n");
           } catch {}
         }
       },

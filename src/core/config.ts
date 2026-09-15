@@ -313,14 +313,14 @@ export function chunkPlan(
   // unchanged. The 1.7B model runs at about realtime, so each chunk must be
   // partly buffered before it plays: smaller chunks keep that wait short.
   //
-  // The PyTorch runtime streams, but generates slower than speech (measured
-  // 1.5x on a laptop with an NVIDIA GPU: the reference implementation is bound by
-  // Python between tiny kernels, not by the GPU), and the player it feeds
-  // on Windows cannot stretch time to hide that. Each chunk therefore waits
-  // for part of itself before it plays, and that wait sets the chunk size:
-  // sentence-sized chunks put the waits between sentences and keep each one
-  // short, where a 130-character chunk opened with five seconds of silence
-  // and stuttered inside.
+  // The PyTorch runtime streams, and its daemon generates the chunks queued
+  // together in one pass, so a message's first chunk is the one whose wait
+  // is heard: with the player on Windows unable to stretch time, it waits
+  // for part of itself before it plays (nothing, once the engine measures
+  // faster than speech, which a laptop with an NVIDIA GPU does at 0.75x; the
+  // shortfall on a slower GPU), and that wait sets the chunk size.
+  // Sentence-sized chunks keep it short, where a 130-character chunk opened
+  // with five seconds of silence and stuttered inside.
   if (engine === "qwen3") {
     if (qwen3Runtime === "torch") {
       return [45, 70, 90];

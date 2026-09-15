@@ -59,6 +59,12 @@ export interface StreamTask {
   /** Resolves after the final part has been delivered. */
   promise: Promise<void>;
   cancel: () => void;
+  /**
+   * The utterance is being played now. An engine that generates several
+   * utterances together streams the one it was asked for and holds the
+   * others' audio until they are wanted; this asks for it.
+   */
+  hot?: () => void;
 }
 
 interface Synthesis {
@@ -338,6 +344,8 @@ export function synthesizeThenPlayBackend(params: {
     listener?: (file: string, final: boolean) => void;
     onFinished?: () => void;
     cancel: () => void;
+    /** Tell the engine this one is being played now (see StreamTask.hot). */
+    hot: () => void;
   }
   const streamSessions = new Map<string, StreamSession>();
 
@@ -349,7 +357,7 @@ export function synthesizeThenPlayBackend(params: {
     language?: string
   ): StreamSession | undefined {
     const base = path.join(os.tmpdir(), `claude-code-tts-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    const session: StreamSession = { parts: [], emitted: 0, finished: false, cancel: () => {} };
+    const session: StreamSession = { parts: [], emitted: 0, finished: false, cancel: () => {}, hot: () => {} };
     let tFirst = 0;
     let audioSinceFirst = 0;
     const task = params.synthesizeStream!(
@@ -401,6 +409,7 @@ export function synthesizeThenPlayBackend(params: {
       task.cancel();
       removeAllParts();
     };
+    session.hot = () => task.hot?.();
     task.promise.then(
       () => {
         // Non-streaming daemons answer with the whole file and no parts.
@@ -459,20 +468,29 @@ export function synthesizeThenPlayBackend(params: {
     // Prebuffer: playback must not outrun synthesis or every part boundary
     // becomes a stutter. Audio is consumed at `tempo` seconds of audio per
     // wall second and produced at 1/rtf; over an utterance of L audio
-    // seconds the shortfall is L * (tempo * rtf - 1), which must be in the
-    // buffer before playback starts. Fast engines start at once.
+    // seconds production must end no later than playback, so playback waits
+    // L * (tempo * rtf - 1) wall seconds, in which the engine makes 1/rtf
+    // of that in audio: L * (pace - 1) / pace, and that is what the buffer
+    // holds before playback starts. (It used to hold the wall-clock figure,
+    // which on an engine 1.9x slower than speech waited for 1.9 times the
+    // audio it needed.) Fast engines start at once.
     const rtf = effectiveRtf();
+    const pace = tempo * rtf;
     const audioSecs = ((req.text.length / 5.5 / naturalWpm) * 60) / synthSpeed; // ~5.5 chars per word
-    const deficit = Math.max(0, audioSecs * (tempo * rtf - 1)) * 1.1;
+    const deficit = Math.max(0, (audioSecs * (pace - 1)) / pace) * 1.1;
     // Waiting is only worth it up to a point. Within this bound, buffering
     // buys continuous speech; beyond it the wait itself becomes the problem
     // (and prewarming the next chunk hides most of it anyway).
     // A player that cannot stretch time cannot ease playback to what the
     // engine feeds either, so a short buffer there is heard as stutter
     // inside the sentence: it waits for the whole shortfall (the chunks are
-    // sentence-sized on such engines, so that wait is a pause between two).
+    // sentence-sized on such engines, so that wait is a pause between two),
+    // plus one part's worth, because audio lands a part at a time and
+    // playback must not reach the end of one before the next is there.
     const MAX_PREBUFFER_SECONDS = stretching ? 2 : 6;
-    const prebufferSecs = Math.min(audioSecs, MAX_PREBUFFER_SECONDS, (rtf > 0.5 ? 0.4 : 0.1) + deficit);
+    const PART_SECONDS = 1; // what the streaming daemons hand out at a time
+    const base = stretching ? (rtf > 0.5 ? 0.4 : 0.1) : PART_SECONDS / Math.max(1, pace);
+    const prebufferSecs = Math.min(audioSecs, MAX_PREBUFFER_SECONDS, base + deficit);
     if (deficit > 0.5) {
       pipelineLog(
         `prebuffering ${prebufferSecs.toFixed(1)}s (synthesis ${rtf.toFixed(2)}x realtime, tempo ${tempo.toFixed(2)}, sustainable ${sustainableTempo().toFixed(2)})`
@@ -609,6 +627,9 @@ export function synthesizeThenPlayBackend(params: {
       feed(p.file, p.final);
     }
     session.listener = feed;
+    if (!session.finished) {
+      session.hot();
+    }
     session.onFinished = closeOnFailure;
     if (session.finished) {
       closeOnFailure();
@@ -829,7 +850,7 @@ export function synthesizeThenPlayBackend(params: {
         if (streamSessions.has(k)) {
           return;
         }
-        if (streamSessions.size >= 2) {
+        if (streamSessions.size >= maxPrepared) {
           const [oldKey, old] = streamSessions.entries().next().value!;
           streamSessions.delete(oldKey);
           old.cancel();
