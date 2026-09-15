@@ -11,6 +11,7 @@
 #   stdout: {"id": 1, "part": "/tmp/x.wav", "final": true} then {"id": 1, "ok": true}
 #   {"cancel": 1} drops a queued request (a running generation cannot be aborted).
 # Runs 100% locally; weights come from Hugging Face on first use.
+import collections
 import json
 import os
 import sys
@@ -57,7 +58,18 @@ def conditioning(path):
     return _conds[key]
 
 urgent, background = [], []
-cancelled = set()
+cancelled = collections.OrderedDict()  # cancelled request ids, oldest first
+
+
+def mark_cancelled(cid):
+    """Called with cv held. Oldest out rather than all out: clearing the whole
+    set when it grew past a thousand un-cancelled requests still queued, which
+    then generated audio nobody would play."""
+    cancelled[cid] = True
+    while len(cancelled) > 2000:
+        cancelled.popitem(last=False)
+
+
 cv = threading.Condition()
 eof = False
 
@@ -74,9 +86,7 @@ def reader():
             continue
         with cv:
             if "cancel" in req:
-                cancelled.add(req["cancel"])
-                if len(cancelled) > 1000:
-                    cancelled.clear()
+                mark_cancelled(req["cancel"])
             else:
                 req["_queued_at"] = time.time()
                 (urgent if req.get("priority") else background).append(req)
@@ -172,7 +182,7 @@ while True:
     rid = req["id"]
     with cv:
         skip = rid in cancelled
-        cancelled.discard(rid)
+        cancelled.pop(rid, None)
     if skip:
         print(json.dumps({"id": rid, "ok": False, "error": "cancelled"}), flush=True)
         continue

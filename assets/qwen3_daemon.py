@@ -11,12 +11,13 @@
 #            "clone": {"ref_audio": "/path/ref.wav", "ref_text": "..."}}
 # In clone mode the voice prompt is computed ONCE and reused per request.
 # Runs 100% locally; models are fetched from Hugging Face on first load.
-import array
+import collections
 import json
 import sys
 import threading
 import wave
 
+import numpy as np
 import torch
 from qwen_tts import Qwen3TTSModel
 
@@ -30,14 +31,41 @@ GAIN = float((clone or {}).get("gain", 1.0))
 # Voice-clone prompts are computed once per reference and cached, so a
 # request may name another reference (auditioning a different cloned voice)
 # without reloading the model.
-prompts = {}
+prompts = collections.OrderedDict()
+# A prompt is a set of tensors on the GPU: the cache is bounded, and what it
+# lets go of is freed rather than left to the allocator's high-water mark.
+PROMPT_CACHE = 8
 
 
 def prompt_for(ref_audio, ref_text):
     key = (ref_audio, ref_text)
-    if key not in prompts:
-        prompts[key] = model.create_voice_clone_prompt(ref_audio=ref_audio, ref_text=ref_text)
+    if key in prompts:
+        prompts.move_to_end(key)
+        return prompts[key]
+    prompts[key] = model.create_voice_clone_prompt(ref_audio=ref_audio, ref_text=ref_text)
+    while len(prompts) > PROMPT_CACHE:
+        prompts.popitem(last=False)
+        release_memory()
     return prompts[key]
+
+
+def release_memory():
+    if device.startswith("cuda"):
+        torch.cuda.empty_cache()
+    elif device == "mps" and hasattr(torch, "mps"):
+        torch.mps.empty_cache()
+
+
+def to_pcm16(samples, gain):
+    """Float samples (a numpy array or a tensor, on any device) to little-endian
+    16-bit PCM bytes, with the clone's gain applied. Vectorized: the per-sample
+    Python loop this replaces took longer than the vocoder for a long sentence."""
+    if hasattr(samples, "detach"):
+        samples = samples.detach().float().cpu().numpy()
+    samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if gain != 1.0:
+        samples = np.tanh(samples * gain) if gain > 1.0 else samples * gain
+    return np.clip(samples * 32767.0, -32768.0, 32767.0).astype("<i2").tobytes()
 
 
 if clone:
@@ -46,7 +74,18 @@ if clone:
 # running torch generation cannot be aborted) and "priority": 1 requests
 # are served before queued prewarm work.
 urgent, background = [], []
-cancelled = set()
+cancelled = collections.OrderedDict()  # cancelled request ids, oldest first
+
+
+def mark_cancelled(cid):
+    """Called with cv held. Oldest out rather than all out: clearing the whole
+    set when it grew past a thousand un-cancelled requests still queued, which
+    then generated audio nobody would play."""
+    cancelled[cid] = True
+    while len(cancelled) > 2000:
+        cancelled.popitem(last=False)
+
+
 cv = threading.Condition()
 eof = False
 
@@ -63,9 +102,7 @@ def reader():
             continue
         with cv:
             if "cancel" in req:
-                cancelled.add(req["cancel"])
-                if len(cancelled) > 1000:
-                    cancelled.clear()
+                mark_cancelled(req["cancel"])
             elif "id" in req:
                 (urgent if req.get("priority") else background).append(req)
             cv.notify()
@@ -116,24 +153,21 @@ while True:
         break
     with cv:
         skip = req["id"] in cancelled
-        cancelled.discard(req["id"])
+        cancelled.pop(req["id"], None)
     if skip:
         print(json.dumps({"id": req["id"], "ok": False, "error": "cancelled"}), flush=True)
         continue
     try:
-        wavs, sr = generate(req)
-        samples = wavs[0]
-        gain = float(req.get("gain", GAIN))
-        if gain != 1.0:
-            import math
-
-            samples = [math.tanh(float(s) * gain) if gain > 1.0 else float(s) * gain for s in samples]
-        pcm = array.array("h", (max(-32768, min(32767, int(float(s) * 32767))) for s in samples))
+        # No autograd bookkeeping for a model that is only ever read: the
+        # graph it would build per token is memory the next sentence needs.
+        with torch.inference_mode():
+            wavs, sr = generate(req)
+        pcm = to_pcm16(wavs[0], float(req.get("gain", GAIN)))
         with wave.open(req["out"], "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(int(sr))
-            w.writeframes(pcm.tobytes())
+            w.writeframes(pcm)
         print(json.dumps({"id": req["id"], "ok": True}), flush=True)
     except Exception as e:  # keep serving after a bad request
         print(json.dumps({"id": req["id"], "ok": False, "error": str(e)}), flush=True)

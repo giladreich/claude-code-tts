@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { PyTtsDaemon } = require("../../out/tts/pyDaemon.js");
 const { parseWav } = require("../../out/tts/wav.js");
-const { ROOT, tmpDir, writeWav, pythonWithNumpy, until, sleep } = require("../helpers");
+const { ROOT, tmpDir, writeWav, pythonWithNumpy, until, sleep, plainPython } = require("../helpers");
 
 const python = pythonWithNumpy();
 
@@ -542,7 +542,8 @@ test("daemon that never becomes ready is killed and reported", async () => {
   const dir = tmpDir("cv-fake-");
   fs.writeFileSync(path.join(dir, "hang.py"), "import time\ntime.sleep(30)\n");
   const errors = [];
-  const d = new PyTtsDaemon("python3", path.join(dir, "hang.py"), {}, (m) => errors.push(m), { readyTimeoutMs: 300 });
+  const interpreter = python ?? plainPython() ?? "python3";
+  const d = new PyTtsDaemon(interpreter, path.join(dir, "hang.py"), {}, (m) => errors.push(m), { readyTimeoutMs: 300 });
   await assert.rejects(d.ready, /did not become ready/);
   await until(() => !d.alive, 2000);
   assert.match(errors[0], /did not become ready/);
@@ -1192,6 +1193,63 @@ test(
       assert.equal(parts[0].file, path.join(out, "f.wav"));
     } finally {
       d.dispose();
+    }
+  }
+);
+
+test(
+  "a cancelled request stays cancelled however many cancels follow it",
+  { skip: !python && "no python with numpy" },
+  async () => {
+    // The daemons remembered cancelled ids in a set that was emptied
+    // wholesale once it held a thousand, un-cancelling whatever was still
+    // queued: that request then generated audio nobody would play.
+    const dir = tmpDir("cv-fake-");
+    fakeModules(dir);
+    const { spawn } = require("child_process");
+    const { pythonEnv } = require("../../out/platform/platform.js");
+    const cfg = JSON.stringify({ model: "m", voices: "v", tokens: "t", data_dir: "d" });
+    const proc = spawn(python, [path.join(ROOT, "assets", "kokoro_daemon.py"), cfg], {
+      env: pythonEnv({ PYTHONPATH: dir }),
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const replies = [];
+    let pending = "";
+    proc.stdout.on("data", (d) => {
+      pending += d;
+      const lines = pending.split("\n");
+      pending = lines.pop();
+      for (const line of lines) {
+        if (line.trim()) {
+          replies.push(JSON.parse(line));
+        }
+      }
+    });
+    const send = (o) => proc.stdin.write(JSON.stringify(o) + "\n");
+    try {
+      await until(() => replies.some((r) => r.ready), 20000);
+      const out = tmpDir("cv-parts-");
+      // A long request keeps the daemon busy while the next waits in line.
+      send({
+        id: 1,
+        text: "One two. Three four. Five six. Seven eight.",
+        sid: 0,
+        speed: 1,
+        out: path.join(out, "a.wav"),
+      });
+      send({ id: 2, text: "Later.", sid: 0, speed: 1, out: path.join(out, "b.wav") });
+      send({ cancel: 2 });
+      for (let i = 0; i < 1500; i++) {
+        send({ cancel: 100000 + i }); // requests long finished, or never made
+      }
+      await until(() => replies.some((r) => r.id === 2), 20000);
+      const two = replies.find((r) => r.id === 2);
+      assert.equal(two.ok, false);
+      assert.equal(two.error, "cancelled");
+      assert.equal(fs.existsSync(path.join(out, "b.wav")), false, "no audio was generated for it");
+      assert.equal(replies.find((r) => r.id === 1).ok, true);
+    } finally {
+      proc.kill();
     }
   }
 );

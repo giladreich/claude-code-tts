@@ -10,6 +10,10 @@ changed for you. The format follows
 - `~/.claude/settings.json` is written aside and renamed into place, never truncated first: a crash or a second window writing at the same moment could leave the file, and everything in it, empty. The hook script and the uninstall script write it the same way.
 - Two windows no longer speak the same session at once on Windows: a heartbeat whose rename was refused while another window was reading it dropped the window from the registry for a moment, and a window that could not see itself spoke its own folders while the oldest window spoke them too.
 - Exporting the built-in Windows voice works: its audio was rendered onto the file it was then renamed over, which Windows refused while the voice's process still held it, and the entry was lost.
+- On macOS, an audio part that cannot be opened no longer stalls the player until its watchdog restarts it.
+- Skipping or superseding a sentence prepared ahead of time removes its audio file; a cancelled synthesis left one in the temp directory every time.
+- "Storage and Cleanup" and "Remove Everything" open several times faster on Windows: the size of a Python tool environment (tens of thousands of files) is measured many files at a time.
+- The Qwen3 PyTorch daemon converts its audio to PCM in one vectorized step rather than a Python loop per sample, keeps at most eight voice prompts on the GPU, and generates without autograd bookkeeping; the daemons keep a bounded, oldest-out list of cancelled requests rather than emptying it wholesale, which un-cancelled queued requests and generated audio nobody would play. A daemon that dies mid-write no longer raises in the extension host, and the last lines of a daemon crash reach its log.
 
 ## [1.1.0]
 

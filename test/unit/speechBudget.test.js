@@ -9,9 +9,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { ROOT } = require("../helpers");
+const { ROOT, plainPython } = require("../helpers");
 
-const python = process.platform === "win32" ? "python" : "python3";
+const python = plainPython() ?? "python3";
 
 /** expected_seconds() for each text, via the module the daemons import. */
 function budget(texts) {

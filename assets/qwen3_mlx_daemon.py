@@ -15,6 +15,7 @@
 #   Edge silence is trimmed (the first part's lead-in, and both ends of
 #   whole-file output; a stream is closed by a silence part instead).
 # mlx-audio caches the clone prompt per reference. Runs 100% locally.
+import collections
 import array
 import json
 import os
@@ -177,7 +178,18 @@ if _decoder is not None:
             print(json.dumps({"prime_error": str(e)}), file=sys.stderr, flush=True)
 
 urgent, background = [], []
-cancelled = set()
+cancelled = collections.OrderedDict()  # cancelled request ids, oldest first
+
+
+def mark_cancelled(cid):
+    """Called with cv held. Oldest out rather than all out: clearing the whole
+    set when it grew past a thousand un-cancelled requests still queued, which
+    then generated audio nobody would play."""
+    cancelled[cid] = True
+    while len(cancelled) > 2000:
+        cancelled.popitem(last=False)
+
+
 cv = threading.Condition()
 eof = False
 
@@ -194,9 +206,7 @@ def reader():
             continue
         with cv:
             if "cancel" in req:
-                cancelled.add(req["cancel"])
-                if len(cancelled) > 1000:
-                    cancelled.clear()
+                mark_cancelled(req["cancel"])
             else:
                 (urgent if req.get("priority") else background).append(req)
             cv.notify()
@@ -444,4 +454,4 @@ while True:
         print(json.dumps({"id": rid, "ok": False, "error": str(e)}), flush=True)
     finally:
         with cv:
-            cancelled.discard(rid)
+            cancelled.pop(rid, None)

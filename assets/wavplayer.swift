@@ -148,6 +148,11 @@ func schedule(path: String, gen: Int, id: Int, isFinal: Bool) -> Bool {
         return true
     } catch {
         log("cannot open \(path): \(error.localizedDescription)")
+        // The part is lost, but the stream must still end: a final part that
+        // could not be opened used to leave finalReceived unset, so "done"
+        // never came and the host waited on the stream until its watchdog
+        // killed the player.
+        if isFinal { finalReceived = true }
         return false
     }
 }
@@ -190,8 +195,12 @@ while let line = readLine(strippingNewline: true) {
         let id = streamId
         let isFinal = (obj["final"] as? Bool) ?? false
         let ok = schedule(path: path, gen: gen, id: id, isFinal: isFinal)
+        // Nothing left playing and nothing more to come: no completion
+        // callback will ever report this stream, so it is reported here.
+        let orphaned = !ok && finalReceived && played >= scheduled
         log("append gen=\(gen) id=\(id) ok=\(ok) final=\(isFinal) queued=\(scheduled - played)")
         lock.unlock()
+        if orphaned { print("{\"done\":false,\"id\":\(id),\"error\":\"cannot open audio part\"}") }
     } else if obj["end"] != nil {
         // Stream has no more parts; done fires once everything scheduled played.
         lock.lock()

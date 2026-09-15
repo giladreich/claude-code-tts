@@ -114,6 +114,9 @@ export function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+/** How many entries of a directory are sized at once; more only queues on the thread pool. */
+const SIZE_BATCH = 64;
+
 /**
  * Recursive size in bytes; symlinks are counted as their own size, not
  * followed. Asynchronous on purpose: model caches hold tens of thousands of
@@ -135,9 +138,16 @@ export async function dirSize(p: string): Promise<number> {
   } catch {
     return 0;
   }
+  // The entries of one directory are measured together rather than one
+  // after another: each is a round trip to the thread pool, and a tool venv
+  // holds tens of thousands of files (a scan of one took 8 seconds on
+  // Windows, waited for in sequence).
   let total = 0;
-  for (const e of entries) {
-    total += await dirSize(path.join(p, e.name));
+  for (let i = 0; i < entries.length; i += SIZE_BATCH) {
+    const sizes = await Promise.all(entries.slice(i, i + SIZE_BATCH).map((e) => dirSize(path.join(p, e.name))));
+    for (const n of sizes) {
+      total += n;
+    }
   }
   return total;
 }

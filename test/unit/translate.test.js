@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const { Translator } = require("../../out/language/translate.js");
-const { tmpDir } = require("../helpers");
+const { tmpDir, plainPython } = require("../helpers");
 
 /** A daemon that speaks the real protocol but "translates" by tagging text. */
 function stubDaemon(dir, { failOn = null, failMessage = "no model installed", ready = true } = {}) {
@@ -35,7 +35,7 @@ for line in sys.stdin:
   return script;
 }
 
-const python = process.platform === "win32" ? "python" : "python3";
+const python = plainPython() ?? "python3";
 
 test("translates, caches, and leaves same-language text alone", async () => {
   const dir = tmpDir("cv-tr-");
@@ -100,7 +100,7 @@ for line in sys.stdin:
     print(json.dumps({"id": req["id"], "ok": True, "text": "[%d] %s" % (n, req["text"])}), flush=True)
 `
   );
-  const t = new Translator({ daemonScript: script, python: "python3" });
+  const t = new Translator({ daemonScript: script, python });
   try {
     const first = await t.translate("sentence zero", "en", "de");
     // Fill the cache past its limit, touching entry zero once on the way so it

@@ -63,6 +63,8 @@ export interface StreamTask {
 
 interface Synthesis {
   promise: Promise<string>; // resolves to wav path
+  /** Where the audio is written, known before it is: what a cancelled synthesis leaves behind is removed by name. */
+  wav: string;
   cancel: () => void;
   /** Speed baked into the synthesized audio itself (vs natural pace). */
   synthSpeed: number;
@@ -256,13 +258,13 @@ export function synthesizeThenPlayBackend(params: {
         })
       );
       promise.catch(() => {});
-      return { promise, cancel: task.cancel, synthSpeed };
+      return { promise, wav, cancel: task.cancel, synthSpeed };
     }
 
     if (!params.buildSynth) {
       const promise = Promise.reject<string>(new Error("engine daemon unavailable and no CLI fallback exists"));
       promise.catch(() => {});
-      return { promise, cancel: () => {}, synthSpeed };
+      return { promise, wav, cancel: () => {}, synthSpeed };
     }
     const { cmd, args, stdinText } = params.buildSynth(text, synthWpm, voice, wav);
     // stderr is kept (last few hundred characters): "exited with 1" alone
@@ -295,6 +297,7 @@ export function synthesizeThenPlayBackend(params: {
     promise.catch(() => {}); // avoid unhandled rejection when nobody awaits yet
     return {
       promise,
+      wav,
       cancel: () => {
         try {
           proc.kill("SIGKILL");
@@ -302,6 +305,21 @@ export function synthesizeThenPlayBackend(params: {
       },
       synthSpeed,
     };
+  }
+
+  /**
+   * Cancel a prepared synthesis nobody will play and remove its file. By
+   * name and at once, then again when the work settles either way: a
+   * cancelled synthesis rejects, and cleanup that waited for it to resolve
+   * left a WAV in the temp directory for every skipped or superseded
+   * utterance. Only entries out of the map come here, so a file handed to
+   * playback is never touched.
+   */
+  function discard(s: Synthesis): void {
+    s.cancel();
+    const remove = () => fs.unlink(s.wav, () => {});
+    remove();
+    s.promise.then(remove, remove);
   }
 
   /**
@@ -824,8 +842,7 @@ export function synthesizeThenPlayBackend(params: {
       if (prewarmed.size >= maxPrepared) {
         const [oldestKey, oldest] = prewarmed.entries().next().value!;
         prewarmed.delete(oldestKey);
-        oldest.cancel();
-        oldest.promise.then((wav) => fs.unlink(wav, () => {})).catch(() => {});
+        discard(oldest);
       }
       prewarmed.set(k, synth(text, voice, synthSpeed, false, language));
     },
@@ -835,8 +852,7 @@ export function synthesizeThenPlayBackend(params: {
       }
       streamSessions.clear();
       for (const s of prewarmed.values()) {
-        s.cancel();
-        s.promise.then((wav) => fs.unlink(wav, () => {})).catch(() => {});
+        discard(s);
       }
       prewarmed.clear();
     },

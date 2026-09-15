@@ -74,8 +74,20 @@ export class PyTtsDaemon {
         } catch {}
         fs.appendFileSync(log, `${new Date().toISOString()} start ${python} ${script}\n`);
       } catch {}
-      this.proc.stderr?.on("data", (d) => fs.appendFile(log, String(d), () => {}));
+      // One open stream rather than an appendFile per chunk: those ran on
+      // the thread pool in whatever order it got to them, so a traceback
+      // could land in the log out of sequence, and each cost an open and a
+      // close for a few bytes of progress output.
+      const stream = fs.createWriteStream(log, { flags: "a" });
+      stream.on("error", () => {});
+      this.proc.stderr?.on("data", (d) => stream.write(d));
+      // "close", not "exit": stderr can still deliver after the process has
+      // exited, and the last lines of a traceback are the exception itself.
+      this.proc.on("close", () => stream.end());
     }
+    // A write into a daemon that has just died raises on the pipe, not on
+    // the process; unhandled, that is an exception in the extension host.
+    this.proc.stdin?.on("error", () => {});
     let readyResolve!: () => void;
     let readyReject!: (e: Error) => void;
     this.ready = new Promise<void>((res, rej) => ((readyResolve = res), (readyReject = rej)));

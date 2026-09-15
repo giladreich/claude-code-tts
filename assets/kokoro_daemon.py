@@ -16,6 +16,7 @@
 # Streaming uses sherpa's generation callback: audio parts are emitted every
 # ~0.4s of audio, so playback can start long before synthesis finishes.
 # Runs 100% locally; no sockets, no network.
+import collections
 import array
 import json
 import os
@@ -119,7 +120,18 @@ def write_wav(path, samples):
 
 
 urgent, background = [], []
-cancelled = set()
+cancelled = collections.OrderedDict()  # cancelled request ids, oldest first
+
+
+def mark_cancelled(cid):
+    """Called with cv held. Oldest out rather than all out: clearing the whole
+    set when it grew past a thousand un-cancelled requests still queued, which
+    then generated audio nobody would play."""
+    cancelled[cid] = True
+    while len(cancelled) > 2000:
+        cancelled.popitem(last=False)
+
+
 cv = threading.Condition()
 eof = False
 
@@ -136,9 +148,7 @@ def reader():
             continue
         with cv:
             if "cancel" in req:
-                cancelled.add(req["cancel"])
-                if len(cancelled) > 1000:
-                    cancelled.clear()
+                mark_cancelled(req["cancel"])
             else:
                 (urgent if req.get("priority") else background).append(req)
             cv.notify()
@@ -242,4 +252,4 @@ while True:
         print(json.dumps({"id": rid, "ok": False, "error": str(e)}), flush=True)
     finally:
         with cv:
-            cancelled.discard(rid)
+            cancelled.pop(rid, None)
