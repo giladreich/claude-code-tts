@@ -411,3 +411,21 @@ test("choosing the language Claude already writes in downloads nothing", () => {
   assert.equal(translationModelMissing(["en>de"], "en", "he"), true);
   assert.equal(translationModelMissing(["en>de", "en>he"], "en", "he"), false);
 });
+
+test("a sentence whose identifiers the model drops is translated with them in the open, not left as written", async () => {
+  // Two file names in one sentence were more than this model carried
+  // through, and the whole paragraph used to be spoken in the wrong
+  // language for it. Now that sentence is asked for on its own and, when
+  // the placeholders still vanish, with the names left in the text.
+  const dir = tmpDir("cv-tr-");
+  const t = new Translator({ daemonScript: fragileDaemon(dir, { mode: "drop" }), python, keepTerms: () => [] });
+  try {
+    const text = "Rename foo.ts to bar.ts first. Then run the tests.";
+    const out = await t.translate(text, "en", "ar");
+    assert.ok(out.includes("foo.ts") && out.includes("bar.ts"), `the names are in the sentence: ${out}`);
+    assert.ok(!out.includes("Rename foo.ts to bar.ts first"), `the sentence is translated, not copied: ${out}`);
+    assert.ok(out.startsWith("[ar]"), out);
+  } finally {
+    t.dispose();
+  }
+});

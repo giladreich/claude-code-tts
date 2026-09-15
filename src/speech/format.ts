@@ -178,6 +178,36 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
 }
 
 /**
+ * A tool announcement of the "verb + argument" shape, taken apart for
+ * translation: the verb phrase in a fuller form the models translate as a
+ * sentence, and the argument to put back after it as written. "Writing" in
+ * front of a placeholder came back from one model as "tag:", every time,
+ * whatever the placeholder looked like; "Writing the file" comes back as
+ * the words. Announcements with a label ("Bash: ...") are handled by the
+ * glossary's label rule and are not taken apart here.
+ */
+export function announcementParts(
+  text: string
+): { phrase: string; argument: string; translateArgument: boolean } | undefined {
+  const shapes: [RegExp, string, boolean][] = [
+    [/^Reading (.+)$/, "Reading the file", false],
+    [/^Writing (.+)$/, "Writing the file", false],
+    [/^Editing (.+)$/, "Editing the file", false],
+    [/^Searching for (.+)$/, "Searching for the pattern", false],
+    [/^Finding files (.+)$/, "Finding files matching", false],
+    [/^Using skill (.+)$/, "Using the skill", false],
+    [/^Searching the web for (.+)$/, "Searching the web for", true],
+  ];
+  for (const [shape, phrase, translateArgument] of shapes) {
+    const m = shape.exec(text);
+    if (m) {
+      return { phrase, argument: m[1], translateArgument };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Prose split at its sentence ends.
  *
  * Sentences end differently across scripts: CJK full stops and their

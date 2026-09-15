@@ -679,7 +679,7 @@ export function activate(context: vscode.ExtensionContext): void {
       for (const u of speakable) {
         const text = applySubstitutions(u.text, cfg.substitutions);
         runtime.output.appendLine(`[speak ${u.kind} @${runtime.speech!.currentRate()}wpm] ${text}`);
-        speakLine(text, group);
+        speakLine(text, group, u.kind === "tool");
       }
       countSpoken(speakable.length);
       updateStatus();

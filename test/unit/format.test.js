@@ -105,6 +105,22 @@ test("a sentence far longer than the plan is cut at its clauses; one that fits i
   assert.equal(cut.join(" "), numbers);
 });
 
+test("a verb-and-argument announcement comes apart for translation, a labelled one does not", () => {
+  const { announcementParts } = require("../../out/speech/format.js");
+  assert.deepEqual(announcementParts("Writing edit_design.py"), {
+    phrase: "Writing the file",
+    argument: "edit_design.py",
+    translateArgument: false,
+  });
+  assert.deepEqual(announcementParts("Searching the web for cheap flights"), {
+    phrase: "Searching the web for",
+    argument: "cheap flights",
+    translateArgument: true,
+  });
+  assert.equal(announcementParts("Bash: run the tests"), undefined, "the glossary hides its label instead");
+  assert.equal(announcementParts("Fetching a web page"), undefined);
+});
+
 test("utterancesFromLine handles text, tools, errors, sidechains", () => {
   const opts = { speakText: true, speakTools: true, speakErrors: true, speakSubagents: false, chunkChars: 260 };
   const names = new Map();

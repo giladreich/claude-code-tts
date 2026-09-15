@@ -102,7 +102,7 @@ const CODE_LIKE = new RegExp(
  */
 const LEADING_LABEL = /^[A-Z][A-Za-z0-9+#.]{1,20}:(?=\s)/;
 
-export function maskTerms(text: string, terms: string[]): Masked {
+export function maskTerms(text: string, terms: string[], hideIdentifiers = true): Masked {
   const kept: string[] = [];
   const hide = (match: string): string => {
     kept.push(match);
@@ -111,8 +111,13 @@ export function maskTerms(text: string, terms: string[]): Masked {
   // The announcement label first, so it is hidden whole and keeps its colon.
   let out = text.replace(LEADING_LABEL, hide);
   // Then code-like tokens: they may contain a glossary word ("test_runner"),
-  // and hiding the whole token keeps it in one piece.
-  out = out.replace(CODE_LIKE, hide);
+  // and hiding the whole token keeps it in one piece. Left in the open only
+  // as the last resort, for a sentence the model will not carry them
+  // through (translate.ts): a mangled identifier inside a translated
+  // sentence over a sentence left in the wrong language.
+  if (hideIdentifiers) {
+    out = out.replace(CODE_LIKE, hide);
+  }
   const pattern = termPattern(terms);
   if (pattern) {
     out = out.replace(pattern, hide);

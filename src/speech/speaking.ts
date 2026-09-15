@@ -9,7 +9,7 @@
  */
 import * as vscode from "vscode";
 import { chunkPlanFor, config } from "../core/config";
-import { chunkForSpeech, cleanTextForSpeech } from "./format";
+import { announcementParts, chunkForSpeech, cleanTextForSpeech } from "./format";
 import { countScripts, detectLanguage } from "../language/language";
 import { resolveSpeakTarget, SpeakTarget } from "../session/selection";
 import { runtime } from "../core/runtime";
@@ -70,7 +70,7 @@ export function isPromptLine(line: string): boolean {
   return line.includes('"type":"user"') && !line.includes('"tool_result"') && !line.includes('"isMeta":true');
 }
 
-export function speakLine(text: string, group?: string): void {
+export function speakLine(text: string, group?: string, announcement = false): void {
   if (!translating()) {
     runtime.speech?.enqueue(text, group);
     return;
@@ -94,7 +94,15 @@ export function speakLine(text: string, group?: string): void {
         enqueueChunked(text, group);
         return;
       }
-      const translated = await runtime.translator.translate(text, from, target);
+      // A "verb + argument" announcement is translated in two pieces (see
+      // announcementParts): the model turned "Writing" in front of a file
+      // name into "tag:" every time.
+      const parts = announcement ? announcementParts(text) : undefined;
+      const translated = parts
+        ? `${await runtime.translator.translate(parts.phrase, "en", target)} ${
+            parts.translateArgument ? await runtime.translator.translate(parts.argument, from, target) : parts.argument
+          }`
+        : await runtime.translator.translate(text, from, target);
       if (translated !== text) {
         runtime.output.appendLine(`[translated ${from} to ${target}] ${translated}`);
       }
