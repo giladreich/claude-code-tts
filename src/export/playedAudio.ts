@@ -22,6 +22,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { removeFile, replaceFile, tempPathFor, writeFileAtomicSync } from "../platform/atomicFile";
 import { PlayedUtterance } from "../tts/played";
 import { buildWav, parseWav } from "../tts/wav";
 
@@ -134,7 +135,7 @@ export class PlayedAudio {
     this.foreignReadAt = Date.now();
     for (const name of safeList(this.dir)) {
       const full = path.join(this.dir, name);
-      if (!/^p.+\.wav(\.tmp)?$/.test(name) || claimed.has(full)) {
+      if (!/^(p|raw-).+\.wav(\.(.*\.)?tmp)?$/.test(name) || claimed.has(full)) {
         continue;
       }
       try {
@@ -276,14 +277,23 @@ export class PlayedAudio {
     if (parts.length > 0) {
       this.work = this.work.then(() => this.absorb(entry, parts, out)).catch(() => this.drop(entry));
     } else {
+      // Rendered to its own file and absorbed from there like any other part,
+      // never rendered onto `out` itself: on Windows the OS voice's process
+      // can still hold the file it wrote for a moment after it exits, and a
+      // rename over it then fails and lost the entry.
       const render = u.render!;
+      const raw = path.join(this.dir, `raw-${this.token}-${entry.id}.wav`);
       this.renders = this.renders
         .then(() => {
           fs.mkdirSync(this.dir, { recursive: true });
-          return render(out);
+          return render(raw);
         })
-        .then(() => (this.work = this.work.then(() => this.absorb(entry, [out], out))))
-        .catch(() => this.drop(entry));
+        .then(
+          // Every link of `work` settles: a rejected one would skip the next
+          // entry's absorb and drop that entry instead.
+          () => (this.work = this.work.then(() => this.absorb(entry, [raw], out)).catch(() => this.drop(entry, raw))),
+          () => this.drop(entry, raw)
+        );
     }
     return true;
   }
@@ -341,33 +351,40 @@ export class PlayedAudio {
 
   /**
    * Join the parts of one utterance into one canonical WAV (16-bit mono) and
-   * take the parts away. A file written straight to `out` by a renderer is
-   * rewritten in place, which also normalizes whatever the OS engine wrote.
+   * take the parts away; this also normalizes whatever an OS engine wrote.
    */
   private async absorb(entry: PlayedEntry, parts: string[], out: string): Promise<void> {
     fs.mkdirSync(this.dir, { recursive: true });
     const pcm: Buffer[] = [];
     let rate = 0;
-    for (const part of parts) {
-      const buf = await fs.promises.readFile(part);
-      const info = parseWav(buf);
-      if (!info || info.bitsPerSample !== 16) {
-        throw new Error(`${path.basename(part)}: not 16-bit PCM`);
+    let data: Buffer;
+    try {
+      for (const part of parts) {
+        const buf = await fs.promises.readFile(part);
+        const info = parseWav(buf);
+        if (!info || info.bitsPerSample !== 16) {
+          throw new Error(`${path.basename(part)}: not 16-bit PCM`);
+        }
+        if (rate && info.sampleRate !== rate) {
+          throw new Error("parts of one utterance at different sample rates");
+        }
+        rate = info.sampleRate;
+        pcm.push(toMono(buf.subarray(info.dataOffset, info.dataOffset + info.dataLength), info.channels));
       }
-      if (rate && info.sampleRate !== rate) {
-        throw new Error("parts of one utterance at different sample rates");
+      data = Buffer.concat(pcm);
+      const tmp = tempPathFor(out);
+      try {
+        await fs.promises.writeFile(tmp, buildWav(data, rate, 1, 16));
+        await replaceFile(tmp, out, true);
+      } catch (e) {
+        await fs.promises.rm(tmp, { force: true });
+        throw e;
       }
-      rate = info.sampleRate;
-      pcm.push(toMono(buf.subarray(info.dataOffset, info.dataOffset + info.dataLength), info.channels));
-    }
-    const data = Buffer.concat(pcm);
-    const tmp = `${out}.tmp`;
-    await fs.promises.writeFile(tmp, buildWav(data, rate, 1, 16));
-    await fs.promises.rename(tmp, out);
-    for (const part of parts) {
-      if (part !== out) {
-        fs.unlink(part, () => {});
-      }
+    } finally {
+      // The parts were handed over, whatever became of them; waited for, so
+      // ready() means they are gone. A renderer's process can hold its file
+      // for a moment after it exits, so the removal retries.
+      await Promise.all(parts.map((part) => removeFile(part)));
     }
     entry.seconds = data.length / 2 / rate;
     entry.sampleRate = rate;
@@ -377,10 +394,13 @@ export class PlayedAudio {
     this.save();
   }
 
-  private drop(entry: PlayedEntry): void {
+  /** Forget an entry and remove its audio, and whatever else it left behind. */
+  private drop(entry: PlayedEntry, ...leftovers: string[]): void {
     this.own = this.own.filter((e) => e !== entry);
-    if (entry.file) {
-      fs.rm(entry.file, { force: true }, () => {});
+    for (const file of [entry.file, ...leftovers]) {
+      if (file) {
+        fs.rm(file, { force: true }, () => {});
+      }
     }
   }
 
@@ -424,9 +444,7 @@ export class PlayedAudio {
         fs.rmSync(file, { force: true }); // nothing to list: no index to read
         return;
       }
-      fs.mkdirSync(this.dir, { recursive: true });
-      fs.writeFileSync(`${file}.tmp`, this.indexBody());
-      fs.renameSync(`${file}.tmp`, file);
+      writeFileAtomicSync(file, this.indexBody(), { fsync: false, copyWhenLocked: true });
     } catch {
       /* the next change writes it again */
     }

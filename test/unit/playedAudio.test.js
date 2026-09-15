@@ -315,3 +315,39 @@ test("a closed window adopted by two windows at once is listed once", async () =
   await new Promise((r) => setTimeout(r, 400));
   assert.ok(!fs.existsSync(path.join(dir, "index-c.json")), "nothing to list, no index");
 });
+
+test("an engine without files is rendered to a file of its own, never onto the buffer's, and the render is taken away", async () => {
+  // The OS voice's process can hold the file it wrote for a moment after
+  // it exits, and on Windows a rename over it then fails and lost the entry.
+  const dir = path.join(tmpDir(), "played");
+  const buffer = new PlayedAudio(dir, () => 600, { token: "w" });
+  buffer.load();
+  const rendered = [];
+  const render = async (out) => {
+    rendered.push(out);
+    writeWav(out, 0.2, { rate: 22050 });
+  };
+  assert.equal(buffer.retain(utterance({ render })), true);
+  await buffer.ready();
+  const [entry] = buffer.list();
+  assert.equal(rendered.length, 1);
+  assert.notEqual(rendered[0], entry.file, "rendered aside");
+  assert.equal(fs.existsSync(rendered[0]), false);
+  assert.equal(parseWav(fs.readFileSync(entry.file)).sampleRate, 22050);
+  assert.ok(Math.abs(entry.seconds - 0.2) < 0.01, `seconds ${entry.seconds}`);
+  // A render whose output is not audio is dropped with its file, and the
+  // entry after it is unaffected.
+  buffer.retain(utterance({ text: "junk", render: async (out) => fs.writeFileSync(out, "not a wav") }));
+  buffer.retain(utterance({ text: "fine", render }));
+  await buffer.ready();
+  await until(() => buffer.list().length === 2, 2000);
+  assert.deepEqual(
+    buffer.list().map((e) => e.text),
+    ["hello there", "fine"]
+  );
+  assert.deepEqual(
+    fs.readdirSync(dir).filter((f) => /^raw-|tmp$/.test(f)),
+    [],
+    "no render or temporary file is left"
+  );
+});

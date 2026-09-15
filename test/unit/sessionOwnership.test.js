@@ -215,3 +215,74 @@ test("the registry sits where every VSCode build can see it", () => {
     }
   }
 });
+
+// Windows refuses a rename over a file another process has open, and a
+// read of a file being renamed into place. Either used to make a window
+// vanish from the registry for a heartbeat, and a window that cannot see
+// itself speaks its own folders while the oldest window speaks them too.
+const refusing = (code) => {
+  const e = new Error(code);
+  e.code = code;
+  return e;
+};
+
+test("a heartbeat whose rename is refused is retried rather than dropped, so the window stays registered", () => {
+  const dir = tmpDir("cv-own-");
+  const clock = { t: 1000 };
+  const a = windowAt(dir, "a", 0, ["-home-me-alpha"], clock);
+  const b = windowAt(dir, "b", 5, ["-home-me-alpha"], clock);
+  a.start();
+  const real = fs.renameSync;
+  let refused = 0;
+  fs.renameSync = (from, to) => {
+    if (refused++ < 2) {
+      throw refusing("EPERM");
+    }
+    return real(from, to);
+  };
+  try {
+    b.start();
+  } finally {
+    fs.renameSync = real;
+  }
+  try {
+    assert.equal(refused, 3, "refused twice, then written");
+    assert.deepEqual(b.liveIds().sort(), ["a", "b"]);
+    assert.equal(a.owns("-home-me-alpha"), true);
+    assert.equal(b.owns("-home-me-alpha"), false, "the younger window on the same folder stays quiet");
+    assert.deepEqual(
+      fs.readdirSync(dir).filter((f) => f.endsWith(".tmp")),
+      [],
+      "no temporary file is left in the registry"
+    );
+  } finally {
+    a.dispose();
+    b.dispose();
+  }
+});
+
+test("a window whose own record cannot be read for a moment still counts itself", () => {
+  const dir = tmpDir("cv-own-");
+  const clock = { t: 1000 };
+  const a = windowAt(dir, "a", 0, ["-home-me-alpha"], clock);
+  const b = windowAt(dir, "b", 5, ["-home-me-alpha"], clock);
+  a.start();
+  b.start();
+  const real = fs.readFileSync;
+  fs.readFileSync = (file, ...rest) => {
+    if (String(file).endsWith("b.json")) {
+      throw refusing("EBUSY");
+    }
+    return real(file, ...rest);
+  };
+  try {
+    clock.t += 4000; // past the cached reading
+    assert.deepEqual(b.liveIds().sort(), ["a", "b"]);
+    assert.equal(b.owns("-home-me-alpha"), false, "still the younger window, not a window alone");
+    assert.equal(a.owns("-home-me-alpha"), true);
+  } finally {
+    fs.readFileSync = real;
+    a.dispose();
+    b.dispose();
+  }
+});

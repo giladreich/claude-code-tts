@@ -15,6 +15,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { writeFileAtomicSync } from "../platform/atomicFile";
 import { applyHookRemove, settingsHaveScript } from "./hooks";
 
 /** The hook entries are recognised by the script they run, wherever it lives. */
@@ -35,7 +36,7 @@ export function cleanClaudeDirectory(home = os.homedir(), keepWindowRegistry = f
     // An editor on Windows may have left a byte order mark in front of it.
     const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8").replace(/^\uFEFF/, ""));
     if (settingsHaveScript(settings, NOTIFY_SCRIPT_NAME)) {
-      fs.writeFileSync(settingsFile, JSON.stringify(applyHookRemove(settings, NOTIFY_SCRIPT_NAME), null, 2) + "\n");
+      writeFileAtomicSync(settingsFile, JSON.stringify(applyHookRemove(settings, NOTIFY_SCRIPT_NAME), null, 2) + "\n");
       removed.push("the completion-sound hooks in ~/.claude/settings.json");
     }
   } catch {

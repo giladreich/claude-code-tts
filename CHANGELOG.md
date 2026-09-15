@@ -5,6 +5,12 @@ changed for you. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- `~/.claude/settings.json` is written aside and renamed into place, never truncated first: a crash or a second window writing at the same moment could leave the file, and everything in it, empty. The hook script and the uninstall script write it the same way.
+- Two windows no longer speak the same session at once on Windows: a heartbeat whose rename was refused while another window was reading it dropped the window from the registry for a moment, and a window that could not see itself spoke its own folders while the oldest window spoke them too.
+- Exporting the built-in Windows voice works: its audio was rendered onto the file it was then renamed over, which Windows refused while the voice's process still held it, and the entry was lost.
+
 ## [1.1.0]
 
 - Export what was spoken to a file: the last message, or any part of what was played, as an MP3 (or M4A, Opus, FLAC, WAV), in the voice, at the rate and in the language it was heard. The sheet shows the size the file will be as the quality and the range are chosen, each sentence can be heard and left out, and the pauses between sentences are kept natural. The last 30 minutes of speech are kept for it (`export.keepMinutes`; 0 keeps nothing).

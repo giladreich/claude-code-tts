@@ -13,6 +13,40 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 /**
+ * The user's settings file is never truncated in place: the new contents go
+ * to a sibling file and are renamed over it, so a crash or another writer at
+ * the same moment leaves the old file rather than an empty one. Windows can
+ * refuse the rename while another process holds the file; it is retried for
+ * a while and then given up, never copied over the target: a copy is the
+ * truncation this exists to avoid, and the hook is removed at the next event.
+ */
+function writeAtomic(file, text) {
+  const tmp = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`;
+  try {
+    const fd = fs.openSync(tmp, "w");
+    try {
+      fs.writeFileSync(fd, text);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(tmp, file);
+        return;
+      } catch (e) {
+        if (attempt >= 6 || !["EPERM", "EBUSY", "EACCES"].includes(e && e.code)) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * 2 ** attempt);
+      }
+    }
+  } finally {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {}
+  }
+}
+
+/**
  * VSCode runs no code when an extension is uninstalled, so nothing on that
  * side can take these hooks out of ~/.claude/settings.json. This script can:
  * it runs on every Claude Code event, it knows where the extension lived, and
@@ -49,7 +83,7 @@ function removeSelfIfExtensionGone(cfg) {
       else delete settings.hooks[event];
     }
     if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
-    if (changed) fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    if (changed) writeAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   } catch {
     /* no settings file, or not ours to rewrite */
   }
@@ -146,18 +180,22 @@ function run(payload) {
           subagent: "message",
           prompt: "audio-volume-change",
         },
+        // Windows 11 ships fewer sounds than Windows 10 ("Windows Proceed"
+        // is gone), so each kind names a chain and the first one present
+        // plays; without that, a machine set up with another platform's
+        // sound names heard nothing at all and nothing said why.
         win32: {
-          stop: "Windows Proceed",
-          permission: "Windows Notify",
-          question: "Windows Notify",
-          waiting: "Windows Notify",
-          tool: "Windows Navigation Start",
-          subagent: "Windows Print complete",
-          prompt: "Windows Navigation Start",
+          stop: ["Windows Proceed", "Windows Notify System Generic", "notify"],
+          permission: ["Windows Notify", "Windows Notify System Generic", "notify"],
+          question: ["Windows Notify Calendar", "Windows Notify", "notify"],
+          waiting: ["Windows Notify Messaging", "Windows Notify", "notify"],
+          tool: ["Windows Navigation Start", "Windows Menu Command", "ding"],
+          subagent: ["Windows Print complete", "Windows Background", "ding"],
+          prompt: ["Windows Navigation Start", "Windows Menu Command", "ding"],
         },
       }[process.platform] || {};
     const resolve = (name) => {
-      for (const candidate of [name, fallbacks[kind]]) {
+      for (const candidate of [name].concat(fallbacks[kind] || [])) {
         if (!candidate) continue;
         for (const dir of library.dirs) {
           for (const e of library.ext) {
@@ -170,6 +208,11 @@ function run(payload) {
     };
     const file = resolve(sound);
     if (!file) return;
+    // For the tests: say which file would play instead of playing it.
+    if (process.env.CLAUDE_CODE_TTS_NOTIFY_PRINT) {
+      process.stdout.write(`${file}\n`);
+      return;
+    }
 
     // ffplay (from ffmpeg) is used wherever it exists because it is the only
     // one of these that honours the volume setting on every platform.

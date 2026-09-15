@@ -13,6 +13,7 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { applyHookNormalize, applyHookRemove, HookPlanInput, settingsHaveScript } from "./hooks";
+import { writeFileAtomicSync } from "../platform/atomicFile";
 import { resolveNodeCommand } from "../platform/platform";
 
 const CLAUDE_SETTINGS = path.join(os.homedir(), ".claude", "settings.json");
@@ -175,14 +176,19 @@ function loadClaudeSettings(): any {
 const UNREADABLE =
   "~/.claude/settings.json is not valid JSON, so it is left untouched; fix it and enable the sounds again";
 
+/**
+ * Written aside and renamed into place, never truncated first: this file
+ * holds the user's API keys and every other Claude Code setting, and a
+ * crash or a second window writing at the same moment used to be able to
+ * leave it empty.
+ */
 function saveClaudeSettings(settings: any): void {
   // One-time backup before our first ever write.
   const backup = CLAUDE_SETTINGS + ".claude-code-tts-backup";
   if (fs.existsSync(CLAUDE_SETTINGS) && !fs.existsSync(backup)) {
     fs.copyFileSync(CLAUDE_SETTINGS, backup);
   }
-  fs.mkdirSync(path.dirname(CLAUDE_SETTINGS), { recursive: true });
-  fs.writeFileSync(CLAUDE_SETTINGS, JSON.stringify(settings, null, 2) + "\n");
+  writeFileAtomicSync(CLAUDE_SETTINGS, JSON.stringify(settings, null, 2) + "\n");
 }
 
 export function hooksInstalled(context: vscode.ExtensionContext): boolean {
