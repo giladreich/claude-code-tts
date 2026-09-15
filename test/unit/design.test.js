@@ -60,3 +60,43 @@ test("passages are plain prose of a usable length", () => {
     assert.ok(text.length <= 320, `${code} passage is too long (${text.length} chars)`);
   }
 });
+
+test("the takes list keeps every rendering, newest first, and says which came from another description", () => {
+  // The flow module reaches for the editor API; the rows need only a separator kind.
+  const Module = require("module");
+  const origResolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    return request === "vscode" ? "vscode-stub" : origResolve.call(this, request, ...rest);
+  };
+  require.cache["vscode-stub"] = {
+    id: "vscode-stub",
+    filename: "vscode-stub",
+    loaded: true,
+    exports: { window: {}, workspace: {}, commands: {}, ProgressLocation: {}, QuickPickItemKind: { Separator: -1 } },
+  };
+  const { takeRows } = require("../../out/voices/design.js");
+  const take = (n, instruct) => ({
+    wav: `/x/${n}.wav`,
+    seconds: 9.6,
+    heard: "German",
+    referenceLanguage: "de",
+    instruct,
+  });
+  const rows = takeRows(
+    [take(1, "a warm voice"), take(2, "a warm voice"), take(3, "a bright voice")],
+    "a bright voice"
+  );
+  assert.deepEqual(
+    rows.filter((r) => r.take).map((r) => [r.label, r.description, r.detail]),
+    [
+      ["$(play) Take 3", "10s, heard in German", "The latest take"],
+      ["$(play) Take 2", "10s, heard in German", "From an earlier description: a warm voice"],
+      ["$(play) Take 1", "10s, heard in German", "From an earlier description: a warm voice"],
+    ]
+  );
+  assert.deepEqual(
+    rows.filter((r) => r.action).map((r) => r.action),
+    ["another", "describe"],
+    "render again, or from new words; nothing already rendered is lost either way"
+  );
+});

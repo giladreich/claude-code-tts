@@ -22,7 +22,7 @@ Nothing has to be installed first. If you have `uv`, the extension uses it. If n
 
 **From a file** takes audio or video you already have. Name a part of it if the file is long, then pick from the clearest stretches between pauses: each one plays as you move through the list, you can name an exact range instead, and the back arrow returns to the part of the file, the stretch or the transcript. What is said in the stretch you keep is transcribed and shown for you to confirm.
 
-**Design** needs no recording: pick a starter ("Warm American woman", "Calm American man") or describe what you want, and the VoiceDesign model renders a reference in about half a minute. Keep it or try again.
+**Design** needs no recording: pick a starter ("Warm American woman", "Calm American man") or describe what you want, and the VoiceDesign model renders a reference in about half a minute. Every take is kept in a list that plays each one as you move over it: keep the one you like, render another, or change the description and render from that; nothing already rendered is lost until you leave.
 
 Before any of this you choose the voice's **language**. That sets its accent, not its reach: a reference recorded in one language still speaks the others through Chatterbox, with the accent of the one it was recorded in. When you design a voice for a language the designer cannot read, it renders the description on an English passage and then has Chatterbox re-record that voice reading the target language's own passage, so what gets stored is speech in the language the voice is for.
 

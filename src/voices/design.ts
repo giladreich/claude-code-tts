@@ -294,12 +294,111 @@ export async function designVoiceFlow(
   fs.mkdirSync(dir, { recursive: true });
   const logFile = path.join(context.globalStorageUri.fsPath, "qwen3-design.log");
 
+  // Every rendering is kept as a take until the flow ends: results vary per
+  // run, and "try again" used to throw the previous one away, so a take that
+  // turned out to be the best was gone by the time that was clear. The list
+  // plays each one as it is highlighted, and the name step comes back here.
+  const takes: Take[] = [];
+  const discard = (keep?: Take) => {
+    for (const t of takes) {
+      if (t !== keep) {
+        fs.rmSync(t.wav, { force: true });
+      }
+    }
+  };
+  let next: "render" | "choose" = "render";
   for (;;) {
-    const tmpWav = path.join(dir, `.design-${Date.now()}.wav`);
+    if (next === "render") {
+      const tmpWav = path.join(dir, `.design-${Date.now()}.wav`);
+      const outcome = await renderTake(tmpWav);
+      if (outcome === "cancelled" || (outcome === undefined && takes.length === 0)) {
+        discard();
+        return undefined;
+      }
+      if (outcome) {
+        takes.push(outcome);
+      }
+      next = "choose";
+      continue;
+    }
+    const picked = await chooseTake(takes, instruct, volume);
+    if (picked === "another") {
+      next = "render";
+      continue;
+    }
+    if (picked === "describe") {
+      const typed = await inputWithBack(
+        {
+          prompt: "Change the description and render another take with it (the takes so far are kept)",
+          title: "Design a voice: description",
+          value: instruct,
+          validateInput: (v) => (v.trim().length >= 10 ? undefined : "Say a little more about the voice"),
+        },
+        true
+      );
+      if (typed && typed !== BACK) {
+        instruct = typed;
+        next = "render";
+      }
+      continue;
+    }
+    if (!picked) {
+      discard();
+      return undefined;
+    }
+    const chosen = picked;
+    const name = await inputWithBack(
+      {
+        prompt: "Name this voice",
+        title: "Design a voice: name",
+        value: startingLabel || "Designed voice",
+        validateInput: (v) => (v.trim() ? undefined : "Enter a name"),
+      },
+      true
+    );
+    if (!name || name === BACK) {
+      continue; // back to the takes: a rendering costs minutes and is not thrown away over a name
+    }
+    const slug = newProfileSlug(dir, name);
+    const profileDir = path.join(dir, slug);
+    fs.mkdirSync(profileDir, { recursive: true });
+    fs.renameSync(chosen.wav, path.join(profileDir, "ref.wav"));
+    discard(chosen);
+    fs.writeFileSync(
+      path.join(profileDir, "meta.json"),
+      JSON.stringify(
+        {
+          name: name.trim(),
+          // The transcript has to match the audio: when the reference was
+          // re-recorded in the target language, that is the passage it read.
+          refText: chosen.referenceLanguage === code ? passageFor(code) : passage,
+          passage: chosen.referenceLanguage === code ? passageFor(code) : passage,
+          language: code,
+          usedTranscript: true, // synthesized from the passage: the text is exact
+          designed: true,
+          description: chosen.instruct,
+          createdAt: new Date().toISOString(),
+          trimmed: true,
+        },
+        null,
+        2
+      )
+    );
+    return `clone:${slug}`;
+  }
+
+  /**
+   * One rendering with the description as it stands: the reference, then a
+   * re-recording in the voice's language where the designer cannot read it.
+   * Undefined when nothing usable came out (said on screen); "cancelled" when
+   * the person stopped it.
+   */
+  async function renderTake(tmpWav: string): Promise<Take | "cancelled" | undefined> {
+    const description = instruct.trim();
     const result = await render(
-      python,
+      python!,
       script,
-      instruct.trim(),
+      description,
       language,
       passage,
       tmpWav,
@@ -308,11 +407,12 @@ export async function designVoiceFlow(
     );
     if (!result.ok) {
       fs.rmSync(tmpWav, { force: true });
-      if (result.error !== "cancelled") {
-        vscode.window
-          .showErrorMessage(`Claude Code TTS: voice design failed: ${result.error ?? "unknown error"}`, "Show log")
-          .then((p) => p && vscode.workspace.openTextDocument(logFile).then((d) => vscode.window.showTextDocument(d)));
+      if (result.error === "cancelled") {
+        return "cancelled";
       }
+      vscode.window
+        .showErrorMessage(`Claude Code TTS: voice design failed: ${result.error ?? "unknown error"}`, "Show log")
+        .then((p) => p && vscode.workspace.openTextDocument(logFile).then((d) => vscode.window.showTextDocument(d)));
       return undefined;
     }
     const { seconds } = trimSilence(tmpWav);
@@ -333,11 +433,11 @@ export async function designVoiceFlow(
     // the voice is for.
     let referenceLanguage = renderCode;
     if (renderCode !== code) {
-      await prepareText?.(code);
+      await prepareText?.(code!);
       const spoken = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: `Claude Code TTS: recording the voice in ${languageName(code)}...`,
+          title: `Claude Code TTS: recording the voice in ${languageName(code!)}...`,
         },
         () =>
           renderWithChatterbox({
@@ -345,7 +445,7 @@ export async function designVoiceFlow(
             daemonScript: path.join(context.extensionPath, "assets", "chatterbox_daemon.py"),
             runtime: vscode.workspace.getConfiguration("claudeCodeTts").get<string>("chatterbox.runtime", "auto"),
             text: passageFor(code),
-            language: code,
+            language: code!,
             refWav: tmpWav,
             outWav: `${tmpWav}.native.wav`,
           })
@@ -353,72 +453,93 @@ export async function designVoiceFlow(
       if (spoken && trimSilence(`${tmpWav}.native.wav`).seconds >= 4) {
         normalizeReference(`${tmpWav}.native.wav`);
         fs.renameSync(`${tmpWav}.native.wav`, tmpWav);
-        referenceLanguage = code;
+        referenceLanguage = code!;
       } else {
         fs.rmSync(`${tmpWav}.native.wav`, { force: true });
         vscode.window.showWarningMessage(
-          `Claude Code TTS: the voice was designed, but it could not be re-recorded in ${languageName(code)} (Chatterbox is what speaks it). Keeping the English reference, which speaks ${languageName(code)} with an English accent.`
+          `Claude Code TTS: the voice was designed, but it could not be re-recorded in ${languageName(code!)} (Chatterbox is what speaks it). Keeping the English reference, which speaks ${languageName(code!)} with an English accent.`
         );
       }
     }
     const heard =
       referenceLanguage === code
         ? languageName(code)
-        : `${languageName(renderCode)} (its ${languageName(code)} accent could not be recorded)`;
-
-    const sample = playSample(tmpWav, volume);
-    const choice = await vscode.window.showInformationMessage(
-      `This is the designed voice, reading the reference passage in ${heard}. Keep it?`,
-      { modal: true },
-      "Keep this voice",
-      "Try again"
-    );
-    sample.stop();
-    if (choice === "Try again") {
-      fs.rmSync(tmpWav, { force: true });
-      continue; // same description, a fresh render (results vary per run)
-    }
-    if (choice !== "Keep this voice") {
-      fs.rmSync(tmpWav, { force: true });
-      return undefined;
-    }
-
-    const name = await inputWithBack({
-      prompt: "Name this voice",
-      title: "Design a voice: name",
-      value: startingLabel || "Designed voice",
-      validateInput: (v) => (v.trim() ? undefined : "Enter a name"),
-    });
-    if (!name || name === BACK) {
-      // The voice was rendered and kept; only the name is missing, and
-      // throwing the render away over that would cost minutes of GPU time.
-      fs.rmSync(tmpWav, { force: true });
-      return undefined;
-    }
-    const slug = newProfileSlug(dir, name);
-    const profileDir = path.join(dir, slug);
-    fs.mkdirSync(profileDir, { recursive: true });
-    fs.renameSync(tmpWav, path.join(profileDir, "ref.wav"));
-    fs.writeFileSync(
-      path.join(profileDir, "meta.json"),
-      JSON.stringify(
-        {
-          name: name.trim(),
-          // The transcript has to match the audio: when the reference was
-          // re-recorded in the target language, that is the passage it read.
-          refText: referenceLanguage === code ? passageFor(code) : passage,
-          passage: referenceLanguage === code ? passageFor(code) : passage,
-          language: code,
-          usedTranscript: true, // synthesized from the passage: the text is exact
-          designed: true,
-          description: instruct.trim(),
-          createdAt: new Date().toISOString(),
-          trimmed: true,
-        },
-        null,
-        2
-      )
-    );
-    return `clone:${slug}`;
+        : `${languageName(renderCode)} (its ${languageName(code!)} accent could not be recorded)`;
+    return { wav: tmpWav, seconds: trimSilence(tmpWav).seconds, heard, referenceLanguage, instruct: description };
   }
+}
+
+/** One rendering of the voice, kept until the flow ends. */
+export interface Take {
+  wav: string;
+  seconds: number;
+  /** What the reference is heard in, for the row. */
+  heard: string;
+  referenceLanguage: string;
+  /** The description this take was rendered from. */
+  instruct: string;
+}
+
+interface TakeRow extends vscode.QuickPickItem {
+  take?: Take;
+  action?: "another" | "describe";
+}
+
+/**
+ * The rows of the takes list, newest first, so the one just rendered is
+ * under the cursor. A take made from another description says so, since the
+ * description can change between takes.
+ */
+export function takeRows(takes: Take[], instruct: string): TakeRow[] {
+  const rows: TakeRow[] = takes
+    .map((t, i) => ({
+      label: `$(play) Take ${i + 1}`,
+      description: `${Math.round(t.seconds)}s, heard in ${t.heard}`,
+      detail:
+        i === takes.length - 1
+          ? "The latest take"
+          : t.instruct !== instruct.trim()
+            ? `From an earlier description: ${t.instruct.slice(0, 80)}${t.instruct.length > 80 ? "..." : ""}`
+            : "",
+      take: t,
+    }))
+    .reverse();
+  rows.push(
+    { label: "", kind: vscode.QuickPickItemKind.Separator },
+    {
+      label: "$(refresh) Render another take",
+      detail: "The same description; every take comes out different",
+      action: "another",
+    },
+    {
+      label: "$(edit) Change the description...",
+      detail: "Render a take from new words; the takes so far are kept",
+      action: "describe",
+    }
+  );
+  return rows;
+}
+
+/** Which take to keep. Undefined leaves the flow, and the takes with it. */
+async function chooseTake(
+  takes: Take[],
+  instruct: string,
+  volume: number
+): Promise<Take | "another" | "describe" | undefined> {
+  const picked = await pickWithPreview<TakeRow>({
+    items: takeRows(takes, instruct),
+    placeholder:
+      takes.length === 1
+        ? "This is the designed voice reading the passage. Enter keeps it; or render another take to compare"
+        : `${takes.length} takes: move through them to hear each one, Enter keeps the one you like`,
+    title: "Design a voice: takes",
+    // The newest take is the first row, and hearing it is what the person
+    // has been waiting half a minute for: it plays as the list opens.
+    playFirst: true,
+    preview: (row) => (row.take ? playSample(row.take.wav, volume) : undefined),
+  });
+  if (!picked || picked === "back") {
+    return undefined;
+  }
+  return picked.action ?? picked.take;
 }

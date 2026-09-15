@@ -30,6 +30,13 @@ export function pickWithPreview<T extends vscode.QuickPickItem>(opts: {
    * levels in can be left without starting again from the status bar.
    */
   back?: boolean;
+  /**
+   * Play the first row as the list opens. Off by default (a list must not
+   * speak at someone who has not touched it yet); on for a list whose first
+   * row is the thing that was just made, which is what they are waiting to
+   * hear.
+   */
+  playFirst?: boolean;
 }): Promise<T | "back" | undefined> {
   return new Promise((resolve) => {
     const qp = vscode.window.createQuickPick<T>();
@@ -60,7 +67,7 @@ export function pickWithPreview<T extends vscode.QuickPickItem>(opts: {
       if (!item) {
         return;
       }
-      if (Date.now() - shownAt < 400 && item === qp.items[0]) {
+      if (!opts.playFirst && Date.now() - shownAt < 400 && item === qp.items[0]) {
         return;
       }
       stop();
