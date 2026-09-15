@@ -158,7 +158,9 @@ export function synthesizeThenPlayBackend(params: {
   const sustainableTempo = () => 1 / effectiveRtf();
   const player = findWavPlayer();
   const naturalWpm = params.naturalWpm ?? 175;
-  const tempoCapable = player?.supportsTempo ?? false;
+  // The persistent player plays whatever it can; where it does not stretch
+  // time (the Windows host), rates are baked into synthesis instead.
+  const tempoCapable = getPersistentPlayer()?.supportsTempo ?? player?.supportsTempo ?? false;
   /** synthSpeed of the playback currently on the persistent player. */
   let liveSynthSpeed: number | undefined;
   /**
@@ -445,8 +447,11 @@ export function synthesizeThenPlayBackend(params: {
     // engine's natural pace (slow-motion speech is not an improvement).
     const ceiling = () => clamp(Math.max(1, sustainableTempo()), TEMPO_MIN, TEMPO_MAX);
     const requested = clamp(wantedOf(lastWpm) / synthSpeed, TEMPO_MIN, TEMPO_MAX);
-    const tempo = playbackTempo(Math.min(requested, ceiling()));
-    if (tempo < requested - 0.02) {
+    // A player that cannot stretch time (the Windows host) plays at the
+    // engine's own pace, and the pipeline plans for that.
+    const stretching = persistent.supportsTempo;
+    const tempo = stretching ? playbackTempo(Math.min(requested, ceiling())) : 1;
+    if (stretching && tempo < requested - 0.02) {
       pipelineLog(
         `playing at ${tempo.toFixed(2)}x instead of ${requested.toFixed(2)}x: the engine synthesizes at ${(1 / effectiveRtf()).toFixed(2)}x realtime`
       );
@@ -509,7 +514,7 @@ export function synthesizeThenPlayBackend(params: {
         return;
       }
       const lead = fedSecs - ((Date.now() - playStartedAt) / 1000) * liveTempo;
-      if (lead < 0.35 && liveTempo > 0.82) {
+      if (stretching && lead < 0.35 && liveTempo > 0.82) {
         // Down to 0.8x if it must: speech that flows a little slowly is far
         // easier to follow than speech that stops at every part boundary.
         liveTempo = Math.max(0.8, liveTempo * 0.85);
@@ -642,7 +647,7 @@ export function synthesizeThenPlayBackend(params: {
       let heldWav: string | undefined;
       const synthSpeed = splitSynthSpeed(wantedOf(wpm));
       const k = key(text, voice, synthSpeed, language);
-      const streaming = params.synthesizeStream && tempoCapable && getPersistentPlayer();
+      const streaming = params.synthesizeStream && getPersistentPlayer();
       if (streaming) {
         let session = streamSessions.get(k);
         let sessionSpeed = synthSpeed;
@@ -816,7 +821,7 @@ export function synthesizeThenPlayBackend(params: {
     prewarm({ text, wpm, voice, language }) {
       const synthSpeed = splitSynthSpeed(wantedOf(wpm));
       const k = key(text, voice, synthSpeed, language);
-      if (params.synthesizeStream && tempoCapable && getPersistentPlayer()) {
+      if (params.synthesizeStream && getPersistentPlayer()) {
         if (streamSessions.has(k)) {
           return;
         }

@@ -197,7 +197,7 @@ flowchart TD
     D -->|"ffplay present - preferred off macOS"| FF["ffplay: tempo yes,<br/>volume yes, per utterance"]
     D -->|Linux with sox| F["play: tempo yes,<br/>volume yes, per utterance"]
     D -->|Linux| G["paplay / aplay:<br/>volume only / neither"]
-    D -->|Windows without ffplay| H["PowerShell SoundPlayer:<br/>no tempo, no volume"]
+    D -->|Windows without ffplay| H["wav_host.ps1 (waveOut):<br/>no tempo, volume yes,<br/>persistent, parts gapless"]
     FF --> I
     E --> I["rate above the tempo range<br/>is baked into synthesis"]
     F --> I
@@ -238,6 +238,8 @@ Streaming needs both a tempo-capable player and the persistent one, so today it 
 |---|---|---|---|
 | `assets/wavplayer.swift` | Swift (AVAudioEngine) | `audio.ts`, compiled once into globalStorage/bin | Gapless streaming playback, live rate and volume, pause, device-change recovery, idle device release, underrun logging |
 | `assets/sapi_host.ps1` | Windows PowerShell 5.1 (System.Speech) | `system.ts` on Windows | The built-in Windows voice: one process for the session with a synthesizer speaking and another rendering exports, JSON lines in and out; cancel, pause and resume, live volume. A process per sentence cost a second or two of silence between sentences |
+| `assets/wav_host.ps1` | Windows PowerShell 5.1 (winmm waveOut through a C# class it compiles; WPF MediaPlayer for files that are not 16-bit PCM) | `audio.ts` on Windows without ffplay | The Swift player's protocol: play, appended parts queued as PCM buffers on the device (2-3 ms between them, where a file per part through MediaPlayer left 35-250 ms), stop, pause, resume, volume; no time-stretch. A process per file cost about 850 ms of silence per sentence; the process is started at activation and kept, since starting it costs 1.5-2 s |
+| `assets/qwen3_fast.py` | Python (torch) | `qwen3_daemon.py` | Direct sampling of a frame's codebooks in place of a generation pass per frame, replayed as a CUDA graph per batch size (the loop is bound by kernel launches: 96 ms a frame became 17); the talker tap that reports each frame as it is made, which is what the daemon streams from; and the codec decoder run with its state kept between parts (`StreamDecoder`), so a part costs its own frames rather than the whole prefix and the voice reference |
 | `assets/kokoro_daemon.py` | Python (sherpa-onnx) | `kokoro.ts` | Kokoro synthesis, streaming per sentence with reader pauses, cancel, priority |
 | `assets/qwen3_mlx_daemon.py` | Python (mlx-audio) | `qwen3.ts` on Apple Silicon | Qwen3 presets and clones on MLX, streaming, runaway cutoff, per-profile gain. Streaming primes the vocoder with the reference codes once per reference and restores that state before every stream, because a cold vocoder opens an octave high and settles over half a second. Clones go through the clone path directly with the daemon's repetition penalty (1.1; the public `generate()` forces 1.5, which measured flatter and noisier than the speaker) |
 | `assets/qwen3_daemon.py` | Python (qwen-tts, PyTorch) | `qwen3.ts` elsewhere | Same protocol, non-streaming |

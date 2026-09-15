@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import { execFile } from "child_process";
+import { hasCommand } from "../platform/platform";
 import { wavFileSeconds } from "./wav";
 
 /** Name of macOS's current default output device, for actionable warnings. */
@@ -29,6 +30,10 @@ function defaultOutputDevice(cb: (name: string) => void): void {
  * afplay wherever the compiler is unavailable.
  */
 let binPath: string | undefined;
+/** Arguments the player binary is started with (the Windows host is a script run by PowerShell). */
+let binArgs: string[] = [];
+/** Whether this platform's player stretches time (pitch-preserving tempo); the Windows host does not. */
+let stretches = true;
 let compiling = false;
 /** Set when the persistent player proved unreliable this session; afplay takes over. */
 let disabled = false;
@@ -52,6 +57,30 @@ export function initPersistentPlayer(storageDir: string, swiftSource: string, on
     fs.mkdirSync(storageDir, { recursive: true });
     fs.writeFileSync(logFile, ""); // fresh per activation
   } catch {}
+  if (process.platform === "win32") {
+    // The same protocol, spoken by a PowerShell kept for the session
+    // (assets/wav_host.ps1): a process per file cost about 850 ms of
+    // silence per sentence there, and could neither pause nor take a
+    // volume. It does not stretch time, and says so; where ffplay is
+    // installed, its per-file tempo is what the person installed it for,
+    // and it starts in a fraction of the time PowerShell does, so it keeps
+    // playing.
+    if (hasCommand("ffplay")) {
+      return;
+    }
+    binPath = "powershell";
+    binArgs = [
+      "-NoProfile",
+      "-NonInteractive",
+      "-STA",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      path.join(path.dirname(swiftSource), "wav_host.ps1"),
+    ];
+    stretches = false;
+    return;
+  }
   if (process.platform !== "darwin" || compiling || binPath) {
     return;
   }
@@ -125,11 +154,25 @@ class PersistentPlayer {
 
   constructor(private bin: string) {}
 
+  /** Whether a rate other than 1 is honoured: the pipeline plans for a tempo of 1 where it is not. */
+  get supportsTempo(): boolean {
+    return stretches;
+  }
+
+  /** Start the process ahead of the first utterance. */
+  warm(): void {
+    try {
+      this.ensureProc();
+    } catch {
+      /* the first play reports what is wrong */
+    }
+  }
+
   private ensureProc(): ChildProcess {
     if (this.proc) {
       return this.proc;
     }
-    const proc = spawn(this.bin, [], { stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(this.bin, binArgs, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     proc.stderr?.on("data", (d) => logLine(`[player] ${String(d).trimEnd()}`));
     logLine(`[node] spawned player pid=${proc.pid}`);
     const rl = readline.createInterface({ input: proc.stdout });
@@ -173,6 +216,9 @@ class PersistentPlayer {
         this.proc = undefined;
       }
     });
+    // A write into a player that has just died raises on the pipe, not on
+    // the process; unhandled, that is an exception in the extension host.
+    proc.stdin?.on("error", () => {});
     this.proc = proc;
     return proc;
   }
@@ -197,6 +243,13 @@ class PersistentPlayer {
   private scheduleIdleRecycle(): void {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
+    }
+    // A stale device connection is a CoreAudio matter; the Windows host
+    // follows the default device as it changes, and starting it again
+    // costs 1.5-2 s (a PowerShell and a class compiled in it), which the
+    // first sentence after every quiet stretch would pay.
+    if (process.platform === "win32") {
+      return;
     }
     this.idleTimer = setTimeout(() => {
       if (!this.current && this.proc) {
@@ -249,11 +302,17 @@ class PersistentPlayer {
     const onWatchdog = () => {
       if (this.current?.id === id) {
         logLine(`[node] WATCHDOG playback exceeded ${Math.round(expectedMs)}ms; restarting player`);
-        defaultOutputDevice((name) =>
+        if (process.platform === "darwin") {
+          defaultOutputDevice((name) =>
+            onErrorGlobal(
+              `audio playback stalled on output device "${name}" - if that is a Bluetooth headset, it may be asleep, out of range, or not worn; pick another output in macOS Sound settings. Restarting the audio player.`
+            )
+          );
+        } else {
           onErrorGlobal(
-            `audio playback stalled on output device "${name}" - if that is a Bluetooth headset, it may be asleep, out of range, or not worn; pick another output in macOS Sound settings. Restarting the audio player.`
-          )
-        );
+            "audio playback stalled on the output device - if that is a Bluetooth headset, it may be asleep, out of range, or not worn; pick another output in the sound settings. Restarting the audio player."
+          );
+        }
         this.proc?.kill("SIGKILL"); // exit handler rejects the pending playback
       }
     };
@@ -267,13 +326,13 @@ class PersistentPlayer {
           `[node] done id=${id} in ${took}ms (expected ~${Math.round(expectedMs)}ms)${cancelled ? " cancelled" : ""}`
         );
         // Instant "done" on a multi-second file = CoreAudio refused to play in
-        // this process. Twice in a row: hand playback to afplay for the session.
+        // this process. Twice in a row: hand playback to a process per file for the session.
         if (!cancelled && expectedMs > 1500 && took < expectedMs * 0.25) {
           this.earlyDones++;
           if (this.earlyDones >= 2 && !disabled) {
             disabled = true;
             onErrorGlobal(
-              "audio playback ended instantly twice; switching to afplay for this session (see player.log)"
+              "audio playback ended instantly twice; playing each file through its own process for this session (see player.log)"
             );
             this.dispose();
           }
@@ -360,6 +419,11 @@ export function getPersistentPlayer(): PersistentPlayer | undefined {
   }
   if (!player) {
     player = new PersistentPlayer(binPath);
+    // Started now rather than at the first sentence, where its start-up
+    // (1.5-2 s on Windows) was heard as the first sentence arriving late.
+    if (process.platform === "win32") {
+      player.warm();
+    }
   }
   return player;
 }

@@ -239,11 +239,11 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 |---|---|---|---|
 | System voice (`say` / `espeak-ng` / `System.Speech`) | yes | yes | yes |
 | Kokoro, Piper, Qwen3, Chatterbox engines | yes | yes | yes (Qwen3 needs `qwen-tts` and Chatterbox its own virtualenv; MLX is Apple-only; with an NVIDIA GPU the setup installs the PyTorch build that uses it, since the one PyPI ships for Windows runs on the CPU) |
-| Gapless streaming playback, first audio in ~0.5s | yes (bundled player) | no: audio plays per utterance | no: per utterance |
+| Gapless streaming playback, first audio in a second or two | yes (bundled player) | no: audio plays per utterance | yes, without ffplay: a PowerShell player kept for the session plays the parts back to back (about 100 ms between them); with ffplay installed, per utterance through it |
 | Pitch-preserving rate and live rate change | yes | with `ffplay` or `sox` installed | with `ffplay` (from ffmpeg) |
 | Rate without any of those | yes | Kokoro and Piper hit the rate natively; Qwen3 and Chatterbox cannot | same |
-| Volume control | yes | with `ffplay`, `sox` or `paplay` | with `ffplay` (from ffmpeg); otherwise system volume |
-| Pause mid-word | yes | yes | the system voice yes (its speech host holds the synthesizer); the neural engines finish the utterance, then hold |
+| Volume control | yes | with `ffplay`, `sox` or `paplay` | yes |
+| Pause mid-word | yes | yes | yes (the system voice through its speech host, the neural engines through the player kept for the session); with ffplay installed the neural engines finish the utterance, then hold |
 | Clone from the microphone | yes | yes, with `ffmpeg` (PulseAudio or ALSA) | yes, with `ffmpeg` (you pick the input device) |
 | Clone from an audio or video file | yes | yes, with `ffmpeg` installed | yes, with `ffmpeg` installed |
 | Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg`. The system voice through speech-dispatcher (`spd-say`) writes no audio and cannot be exported; `espeak-ng` can | WAV; the rest with `ffmpeg` |
