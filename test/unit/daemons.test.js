@@ -1253,3 +1253,159 @@ test(
     }
   }
 );
+
+/**
+ * torch + qwen_tts fakes for the PyTorch Qwen3 daemon: the talker makes one
+ * 12 Hz frame per step through its forward (which is what the daemon taps to
+ * stream), the codec decoder is causal (a frame decodes to the same 2000
+ * samples wherever it sits), and "RUNAWAY" never stops on its own.
+ */
+function fakeQwenTorch(dir) {
+  fs.mkdirSync(path.join(dir, "torch"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "torch", "__init__.py"),
+    `
+import contextlib, types
+import numpy as np
+backends = types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False))
+cuda = types.SimpleNamespace(is_available=lambda: False, empty_cache=lambda: None)
+float32 = "float32"
+bfloat16 = "bfloat16"
+inference_mode = contextlib.nullcontext
+class Tensor(np.ndarray):
+    def detach(self): return self
+    def float(self): return self
+    def cpu(self): return self
+    def numpy(self): return np.asarray(self)
+    def to(self, *a, **k): return self
+    def item(self): return np.asarray(self).reshape(-1)[0].item()
+def tensor(x): return np.asarray(x).view(Tensor)
+def stack(xs, dim=0): return np.stack([np.asarray(x) for x in xs], axis=dim).view(Tensor)
+def cat(xs, dim=0): return np.concatenate([np.asarray(x) for x in xs], axis=dim).view(Tensor)
+`
+  );
+  fs.mkdirSync(path.join(dir, "qwen_tts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "qwen_tts", "__init__.py"),
+    `
+import time, types
+import numpy as np
+import torch
+SR = 24000
+HOP = 2000  # samples per 12 Hz frame
+EOS = 2150
+class _Tokenizer:
+    def decode(self, items):
+        wavs = []
+        for it in items:
+            codes = np.asarray(it["audio_codes"])
+            t = np.arange(HOP) / SR
+            wav = np.concatenate([0.3 * np.sin(2 * np.pi * (200 + 5 * int(c[0])) * t) for c in codes]) if len(codes) else np.zeros(0)
+            wavs.append(wav.astype(np.float32))
+        return wavs, SR
+class _Talker:
+    def forward(self, codec_ids=None, **kw):
+        return types.SimpleNamespace(hidden_states=(None, codec_ids))
+    def __call__(self, *a, **k):
+        return self.forward(*a, **k)
+class _Inner:
+    def __init__(self):
+        self.talker = _Talker()
+        self.speech_tokenizer = _Tokenizer()
+        self.config = types.SimpleNamespace(talker_config=types.SimpleNamespace(codec_eos_token_id=EOS))
+class Qwen3TTSModel:
+    @classmethod
+    def from_pretrained(cls, model_id, device_map=None, dtype=None):
+        m = cls(); m.model = _Inner(); return m
+    def create_voice_clone_prompt(self, ref_audio, ref_text):
+        n = 3 + sum(ord(c) for c in str(ref_audio)) % 4
+        return {"ref_code": [torch.tensor([[900 + i] + [0] * 15 for i in range(n)])]}
+    def _frames(self, text, max_new_tokens, offset):
+        n = 10000 if "RUNAWAY" in text else max(3, len(text.split()) * 2)
+        n = min(n, max_new_tokens or n)
+        frames = []
+        for k in range(n):
+            time.sleep(0.015)  # a cancel has time to land
+            codec_ids = torch.tensor([[offset + k + 1] + [7] * 15])
+            self.model.talker.forward(codec_ids=codec_ids)  # what the real talker returns per step
+            frames.append(codec_ids[0])
+        self.model.talker.forward(codec_ids=torch.tensor([[EOS] + [0] * 15]))  # the stop frame, never decoded
+        return torch.stack(frames)
+    def generate_custom_voice(self, text="", language="English", speaker="Ryan", max_new_tokens=None, **kw):
+        codes = self._frames(text, max_new_tokens, 0)
+        wavs, sr = self.model.speech_tokenizer.decode([{"audio_codes": codes}])
+        return wavs, sr
+    def generate_voice_clone(self, text=None, language=None, voice_clone_prompt=None, max_new_tokens=None, **kw):
+        t = text[0] if isinstance(text, list) else text
+        ref = voice_clone_prompt["ref_code"][0]
+        codes = self._frames(t, max_new_tokens, 100)
+        full = torch.cat([ref, codes])
+        wavs, sr = self.model.speech_tokenizer.decode([{"audio_codes": full}])
+        cut = int(len(ref) / len(full) * len(wavs[0]))
+        return [wavs[0][cut:]], sr
+`
+  );
+}
+
+test(
+  "Qwen3 torch daemon: streams parts that add up to the whole, cancels mid-generation, and caps a runaway",
+  { skip: !python && "no python with numpy" },
+  async () => {
+    const dir = tmpDir("cv-fake-qwen-");
+    fakeQwenTorch(dir);
+    const out = tmpDir("cv-parts-");
+    const { d, errors } = daemon(
+      "qwen3_daemon.py",
+      { model_id: "fake", clone: { ref_audio: "ref.wav", ref_text: "hi", gain: 1 } },
+      {
+        PYTHONPATH: dir,
+      }
+    );
+    try {
+      await d.ready;
+      const text = "one two three four five six seven eight nine ten eleven twelve";
+      // The whole utterance, then the same text streamed: the parts are the same audio.
+      await d.request({ text, language: "English", out: path.join(out, "whole.wav") }).promise;
+      const parts = [];
+      const t0 = Date.now();
+      let firstAt = 0;
+      await d.request({ text, language: "English", out: path.join(out, "s.wav"), stream: true }, (f, fin) => {
+        if (parts.length === 0) {
+          firstAt = Date.now() - t0;
+        }
+        parts.push([f, fin]);
+      }).promise;
+      assert.ok(parts.length >= 3, `parts: ${parts.length}`);
+      assert.deepEqual(parts.map((p) => p[1]).slice(-1), [true]);
+      assert.ok(firstAt < 400, `first part after ${firstAt} ms, not the whole utterance`);
+      const pcm = (f) => {
+        const b = fs.readFileSync(f);
+        const i = parseWav(b);
+        return b.subarray(i.dataOffset, i.dataOffset + i.dataLength);
+      };
+      const whole = pcm(path.join(out, "whole.wav"));
+      const joined = Buffer.concat(parts.map((p) => pcm(p[0])));
+      assert.equal(
+        joined.length,
+        whole.length + Math.round(24000 * 0.3) * 2,
+        "the parts are the whole plus the closing breath"
+      );
+      assert.deepEqual(joined.subarray(0, whole.length), whole, "sample for sample");
+      // A cancel lands inside the generation.
+      const long = "RUNAWAY " + "word ".repeat(40);
+      const r = d.request({ text: long, language: "English", out: path.join(out, "c.wav"), stream: true }, () => {});
+      await sleep(200);
+      r.cancel();
+      await assert.rejects(r.promise, /cancelled/);
+      assert.equal(fs.readdirSync(out).filter((f) => f.startsWith("c.")).length, 0, "its parts are removed");
+      // A runaway is capped at what the text can plausibly need.
+      const t1 = Date.now();
+      const rr = await d.request({ text: "RUNAWAY short", language: "English", out: path.join(out, "r.wav") }).promise;
+      assert.ok(Date.now() - t1 < 8000, "the cutoff ends it");
+      assert.ok(rr.audio_s < 20, `audio_s ${rr.audio_s}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      d.dispose();
+    }
+  }
+);

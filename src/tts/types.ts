@@ -62,6 +62,8 @@ export interface SpeechConfig {
   qwen3DaemonScript: string;
   /** The persistent System.Speech host the built-in Windows voice speaks through (assets/sapi_host.ps1). */
   systemHostScript: string;
+  /** Longest utterance the queue merges short announcements into; the engine's first chunk size where it has a plan. */
+  coalesceMax?: number;
   /** Directory holding cloned Qwen3 voice profiles (extension storage). */
   qwen3VoicesDir: string;
   /** Chatterbox: voice ("clone:<slug>" or "default") and its storage root. */

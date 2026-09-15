@@ -292,6 +292,10 @@ export function hfModelSnapshot(modelId: string): string | undefined {
   }
 }
 
+/** The uv tool venvs the two runtimes live in: the tool name, and a package inside it that proves it is installed. */
+const MLX_VENV: [string, string] = ["mlx-audio", path.join("mlx_audio", "tts", "models", "qwen3_tts")];
+const TORCH_VENV: [string, string] = ["qwen-tts", "qwen_tts"];
+
 let pythonLookup: { value: string | undefined } | undefined;
 let mlxLookup: { value: string | undefined } | undefined;
 
@@ -304,7 +308,7 @@ export function findQwen3MlxPython(): string | undefined {
   if (process.platform !== "darwin" || process.arch !== "arm64") {
     return (mlxLookup = { value: undefined }).value;
   }
-  const fast = uvToolPython("mlx-audio", path.join("mlx_audio", "tts", "models", "qwen3_tts"));
+  const fast = uvToolPython(...MLX_VENV);
   const value =
     fast ??
     ["python3"].find((p) => {
@@ -330,7 +334,7 @@ export function findQwen3Python(): string | undefined {
   if (pythonLookup) {
     return pythonLookup.value;
   }
-  const fast = uvToolPython("qwen-tts", "qwen_tts");
+  const fast = uvToolPython(...TORCH_VENV);
   const value =
     fast ??
     ["python3", "python"].find((p) => {
@@ -354,6 +358,32 @@ export function resetQwen3Lookups(): void {
 
 export function qwen3Available(): boolean {
   return findQwen3MlxPython() !== undefined || findQwen3Python() !== undefined;
+}
+
+/**
+ * Which runtime this machine would use, answered from the disk alone.
+ *
+ * The probes below start a Python to be sure, and importing mlx_audio or
+ * torch takes seconds; config() is read at activation, so nothing it calls
+ * may do that (see the same rule for hasCommand and sitePackageExists). A
+ * venv on disk is the answer here, or whatever a probe has already found;
+ * a runtime installed outside one is recognised once the engine starts.
+ */
+export function qwen3RuntimeOnDisk(pref: string): "mlx" | "torch" | undefined {
+  const mlx = () =>
+    mlxLookup
+      ? mlxLookup.value
+      : process.platform === "darwin" && process.arch === "arm64"
+        ? uvToolPython(...MLX_VENV)
+        : undefined;
+  const torch = () => (pythonLookup ? pythonLookup.value : uvToolPython(...TORCH_VENV));
+  if (pref === "mlx") {
+    return mlx() ? "mlx" : undefined;
+  }
+  if (pref === "torch") {
+    return torch() ? "torch" : undefined;
+  }
+  return mlx() ? "mlx" : torch() ? "torch" : undefined;
 }
 
 /** Which runtime a given preference resolves to on this machine. */
@@ -514,7 +544,13 @@ export function qwen3Backend(
     idleTimer = setTimeout(unloadIfIdle, ms);
   };
 
-  const getDaemon = (wanted$voice?: string): PyTtsDaemon | undefined => {
+  /**
+   * The daemon for this voice, started or swapped to the checkpoint it needs.
+   * An urgent request (the sentence whose turn it is) may swap the model
+   * under work in flight; a preparation ahead of time may not, and gets
+   * nothing while the daemon is busy with the other checkpoint.
+   */
+  const getDaemon = (wanted$voice?: string, urgent = true): PyTtsDaemon | undefined => {
     refusal = undefined;
     if (!python) {
       return undefined;
@@ -544,14 +580,23 @@ export function qwen3Backend(
       return undefined;
     }
     if (daemon?.alive && daemonModelId !== wanted) {
-      // The voice needs the other checkpoint, and nothing else can serve it.
-      // Only while the daemon is idle: swapping models mid-turn would stop
-      // the sentence being spoken to load gigabytes for one preview.
-      if (daemon.busy) {
-        refusal = "this voice needs the other model, which loads when the engine is idle";
+      // The voice needs the other checkpoint, and nothing else can serve
+      // it. Swapped even while requests are in flight: what is pending is
+      // work for the voice being left (prepared chunks, an audition just
+      // cut off, a cancel the daemon has not answered yet), and refusing
+      // the sentence until the daemon fell idle lost the first sentence
+      // after every voice change. Disposing rejects the pending requests,
+      // which their owners treat as cancellations. A chunk prepared ahead
+      // is the exception: the utterance an audition interrupted is queued
+      // again behind it, and preparing that must not cut the audition off.
+      if (daemon.busy && !urgent) {
         return undefined;
       }
-      pipelineLog(`qwen3: switching model to ${wanted}`);
+      if (daemon.busy) {
+        pipelineLog(`qwen3: switching model to ${wanted} with work in flight for the old one, dropped`);
+      } else {
+        pipelineLog(`qwen3: switching model to ${wanted}`);
+      }
       daemon.dispose();
       daemon = undefined;
       daemonStarts = 0; // a deliberate switch is not a crash
@@ -618,22 +663,26 @@ export function qwen3Backend(
     // factor (Manage Voices) shifts what "natural" means for that voice.
     naturalWpm: 175 / (activeClone()?.pace ?? 1),
     // Measured on Apple Silicon (MLX): 0.6B ~0.7x realtime, 1.7B ~1.0x idle
-    // and slower under load. The pipeline learns the real value as it goes,
-    // and keeps it: a machine that measured slower last week is still slower.
-    typicalRtf: size === "1.7B" ? 1.15 : 0.75,
+    // and slower under load. The PyTorch runtime measured 1.35-1.55x on a
+    // laptop with an NVIDIA GPU with the direct sampling in qwen3_fast.py, 2.7x through
+    // the reference generate() (it is bound by Python between tiny kernels,
+    // not by the GPU). The pipeline learns the real value as it goes, and
+    // keeps it: a machine that measured slower last week is still slower.
+    typicalRtf: runtime === "torch" ? (size === "1.7B" ? 2.5 : 1.5) : size === "1.7B" ? 1.15 : 0.75,
     rememberedRtf: opts.speedMemory?.get(`qwen3:${size}:${runtime ?? "mlx"}`),
     onRtf: (rtf) => opts.speedMemory?.set(`qwen3:${size}:${runtime ?? "mlx"}`, rtf),
     synthesize(text, _wpm, voice, wavPath, urgent, language): SynthTask | undefined {
       // Qwen has no speed knob; our playback tempo carries the user's rate.
-      const d = getDaemon(voice);
+      const d = getDaemon(voice, urgent);
       if (!d) {
         return reason() ?? undefined;
       }
-      // It can still be the wrong one: a switch is refused while the daemon
-      // is speaking, and this voice cannot be served by what is loaded.
+      // getDaemon swapped the checkpoint if this voice needed the other one.
+      // Should the bookkeeping ever disagree, refuse rather than ask a preset
+      // checkpoint to clone, or the cloning checkpoint for a preset.
       if (isCloneVoice(voice) !== (daemonClone !== undefined)) {
         const promise = Promise.reject<void>(
-          new Error("this voice needs the other model; it loads when the engine is idle")
+          new Error("this voice needs the other model, and the wrong one is loaded")
         );
         promise.catch(() => {});
         return { promise, cancel: () => {} };
@@ -663,12 +712,12 @@ export function qwen3Backend(
       };
     },
     synthesizeStream(text, _wpm, voice, wavPathBase, onPart, urgent, language): StreamTask | undefined {
-      const d = getDaemon(voice);
+      const d = getDaemon(voice, urgent);
       if (!d) {
         return undefined;
       }
       if (isCloneVoice(voice) !== (daemonClone !== undefined)) {
-        return undefined;
+        return undefined; // synthesize() says why
       }
       let cancelled = false;
       const payload = {
@@ -703,7 +752,7 @@ export function qwen3Backend(
     // Claude has started writing: load the model now, while it is still
     // thinking, instead of when the first sentence is already waiting.
     wake() {
-      getDaemon();
+      getDaemon(undefined, false);
     },
     get ready() {
       return daemon?.ready ?? Promise.resolve();

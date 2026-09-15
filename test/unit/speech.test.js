@@ -714,3 +714,26 @@ test("an audition is spoken as the language of its sentence, stated or detected"
   q.stop();
   q.dispose();
 });
+
+test("announcements merge only up to the engine's first chunk when the config says so", async () => {
+  // A slow streaming engine is given sentence-sized chunks so its waits fall
+  // between sentences; merging two of them back into one undid that.
+  const engine = fakeEngine(30);
+  const q = new SpeechQueue(
+    { ...baseConfig, coalesceMax: 45 },
+    () => {},
+    undefined,
+    () => engine
+  );
+  q.pause(); // nothing plays: everything queues, so the merging is visible
+  q.enqueue("A first short chunk here.");
+  q.enqueue("A second short chunk which would have merged before.");
+  q.enqueue("Ok.");
+  q.enqueue("Go.");
+  assert.equal(
+    q.pending,
+    3,
+    "the second chunk stays its own utterance; the two tiny ones merge with each other into a third"
+  );
+  q.dispose();
+});

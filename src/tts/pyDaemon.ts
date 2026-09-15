@@ -2,6 +2,7 @@ import { ChildProcess, spawn } from "child_process";
 import { pythonEnv } from "../platform/platform";
 import * as fs from "fs";
 import * as readline from "readline";
+import { StringDecoder } from "string_decoder";
 
 export interface PyDaemonOptions {
   /** Kill and report if "ready" has not arrived by then (model load hang). */
@@ -82,7 +83,23 @@ export class PyTtsDaemon {
       // close for a few bytes of progress output.
       const stream = fs.createWriteStream(log, { flags: "a" });
       stream.on("error", () => {});
-      this.proc.stderr?.on("data", (d) => stream.write(d));
+      // The line that starts each read is stamped with the time: the log
+      // said what happened and never when, so a part that reached the
+      // player long after the daemon wrote it could not be placed from
+      // either side. Progress bars redraw a line without ending it and keep
+      // their one stamp. Decoded statefully: a read can end inside a
+      // multi-byte character, which String() turns into two replacement
+      // marks.
+      const decoder = new StringDecoder("utf8");
+      let lineStart = true;
+      this.proc.stderr?.on("data", (d: Buffer) => {
+        const s = decoder.write(d);
+        if (!s) {
+          return;
+        }
+        stream.write(lineStart ? `${new Date().toISOString()} ${s}` : s);
+        lineStart = s.endsWith("\n");
+      });
       // "close", not "exit": stderr can still deliver after the process has
       // exited, and the last lines of a traceback are the exception itself.
       this.proc.on("close", () => stream.end());

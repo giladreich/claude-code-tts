@@ -275,6 +275,16 @@ class PersistentPlayer {
     let audioSecs = wavDurationSeconds(file) ?? 0;
     let expectedMs = (audioSecs / Math.max(0.5, tempo)) * 1000;
     let startedAt = Date.now();
+    /**
+     * When the player was last given audio. The deadline counts from here:
+     * a stream whose parts trickle in slower than they play is alive for as
+     * long as that takes, and a deadline counted from its start killed one
+     * whose engine had slowed to a crawl (measured: the parts of a
+     * six-second utterance arrived over 106 s on a busy machine, and the
+     * player was restarted one second after the last of them, losing the
+     * sentence it had nearly finished).
+     */
+    let fedAt = startedAt;
     let pausedAt: number | undefined;
     let cancelled = false;
     const id = this.nextId++;
@@ -286,7 +296,8 @@ class PersistentPlayer {
     raw.catch(() => {});
     // Watchdog: a playback that never reports done (audio clock stuck) must
     // not silence the extension forever. Re-armed as parts are appended so
-    // the deadline always reflects the total audio queued.
+    // the deadline always reflects the total audio queued, counted from the
+    // last part fed.
     let timer: NodeJS.Timeout | undefined;
     const armWatchdog = () => {
       if (timer) {
@@ -296,7 +307,7 @@ class PersistentPlayer {
       if (pausedAt !== undefined) {
         return;
       }
-      const delay = Math.max(1000, startedAt + budgetMs(audioSecs) + 8000 - Date.now());
+      const delay = Math.max(1000, fedAt + budgetMs(audioSecs) + 8000 - Date.now());
       timer = setTimeout(onWatchdog, delay);
     };
     const onWatchdog = () => {
@@ -353,6 +364,7 @@ class PersistentPlayer {
         const secs = wavDurationSeconds(part) ?? 0;
         audioSecs += secs;
         expectedMs += (secs / Math.max(0.5, tempo)) * 1000;
+        fedAt = Date.now();
         armWatchdog();
         self.send({ append: part, final });
       },
@@ -381,7 +393,9 @@ class PersistentPlayer {
       },
       unfreeze: () => {
         if (pausedAt !== undefined) {
-          startedAt += Date.now() - pausedAt; // the deadline shifts by the pause
+          const paused = Date.now() - pausedAt;
+          startedAt += paused; // the deadline shifts by the pause
+          fedAt += paused;
           pausedAt = undefined;
           armWatchdog();
         }

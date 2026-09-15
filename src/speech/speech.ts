@@ -275,6 +275,11 @@ export class SpeechQueue {
   /** Language of the message being spoken, kept across short utterances. */
   private languages = new LanguageTracker();
 
+  /** How long a merged utterance may grow: the engine's own chunk size where it has one. */
+  private coalesceMax(): number {
+    return Math.min(COALESCE_MAX, this.config.coalesceMax ?? COALESCE_MAX);
+  }
+
   enqueue(text: string, group?: string): void {
     // Last line of defence for every path into the queue (translation,
     // selection, tests): an utterance with nothing to pronounce is dropped
@@ -288,8 +293,12 @@ export class SpeechQueue {
     }
     // Coalesce small backlogged utterances (bursts of tool announcements):
     // one synthesis + one playback instead of paying per-utterance overhead.
+    // Up to the engine's own limit: the chunks a slow streaming engine is
+    // given are sized so that the wait for each falls between sentences,
+    // and merging two of them back into one made a 10-second utterance
+    // that opened with five seconds of silence and stuttered inside.
     const last = this.queue[this.queue.length - 1];
-    if (last !== undefined && last.text.length + text.length + 2 <= COALESCE_MAX) {
+    if (last !== undefined && last.text.length + text.length + 2 <= this.coalesceMax()) {
       const sep = /[.!?]$/.test(last.text.trimEnd()) ? " " : ". ";
       last.text = last.text + sep + text; // the merged utterance keeps the first one's message
     } else {
@@ -776,7 +785,7 @@ export class SpeechQueue {
       // synthesis. On an engine that cannot abort a running generation each
       // one costs seconds, so the tail waits until it can no longer grow.
       // queue[0] is always prepared: it plays next.
-      if (i > 0 && i === this.queue.length - 1 && next.text.length + 3 <= COALESCE_MAX) {
+      if (i > 0 && i === this.queue.length - 1 && next.text.length + 3 <= this.coalesceMax()) {
         return;
       }
       const plan = this.planFor(next.text);

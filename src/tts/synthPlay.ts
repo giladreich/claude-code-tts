@@ -467,7 +467,11 @@ export function synthesizeThenPlayBackend(params: {
     // Waiting is only worth it up to a point. Within this bound, buffering
     // buys continuous speech; beyond it the wait itself becomes the problem
     // (and prewarming the next chunk hides most of it anyway).
-    const MAX_PREBUFFER_SECONDS = 2;
+    // A player that cannot stretch time cannot ease playback to what the
+    // engine feeds either, so a short buffer there is heard as stutter
+    // inside the sentence: it waits for the whole shortfall (the chunks are
+    // sentence-sized on such engines, so that wait is a pause between two).
+    const MAX_PREBUFFER_SECONDS = stretching ? 2 : 6;
     const prebufferSecs = Math.min(audioSecs, MAX_PREBUFFER_SECONDS, (rtf > 0.5 ? 0.4 : 0.1) + deficit);
     if (deficit > 0.5) {
       pipelineLog(
@@ -833,6 +837,17 @@ export function synthesizeThenPlayBackend(params: {
         const session = startStream(text, voice, synthSpeed, false, language);
         if (session) {
           streamSessions.set(k, session);
+          // A preparation that fails before its turn is forgotten, and the
+          // chunk is synthesized when it comes up. Kept, it was played as
+          // the chunk's own failure: the model swapped under it for a voice
+          // change, or the engine declined to prepare it while busy, and
+          // the sentence was reported as failed instead of being spoken.
+          session.onFinished = () => {
+            if (session.error && streamSessions.get(k) === session) {
+              streamSessions.delete(k);
+              session.cancel();
+            }
+          };
           return;
         }
         // The engine declined to stream this one (Chatterbox streams only the
@@ -849,7 +864,16 @@ export function synthesizeThenPlayBackend(params: {
         prewarmed.delete(oldestKey);
         discard(oldest);
       }
-      prewarmed.set(k, synth(text, voice, synthSpeed, false, language));
+      const s = synth(text, voice, synthSpeed, false, language);
+      prewarmed.set(k, s);
+      // Same as the stream sessions above: a whole preparation that fails
+      // is dropped, not handed to the chunk at its turn.
+      s.promise.catch(() => {
+        if (prewarmed.get(k) === s) {
+          prewarmed.delete(k);
+          discard(s);
+        }
+      });
     },
     flush() {
       for (const session of streamSessions.values()) {
