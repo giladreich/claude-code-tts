@@ -11,7 +11,8 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { uvToolPython } from "../platform/platform";
+import { nvidiaDriver } from "../platform/gpu";
+import { isWindows, uvToolPython } from "../platform/platform";
 import { PyTtsDaemon } from "./pyDaemon";
 import { StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
 import { pipelineLog } from "./wavPlayers";
@@ -57,6 +58,29 @@ const QWEN3_LANGUAGES = [
 ];
 
 // ------------------------------ cloned voices ------------------------------
+
+let cpuNoticeGiven = false;
+
+/**
+ * Said once per session when the PyTorch runtime loaded on the CPU: on
+ * Windows that is the CPU build of torch on a machine that may well have
+ * a GPU (PyPI ships no other build there), and the setup can put that
+ * right. Elsewhere the log line is enough: a Linux torch carries CUDA and
+ * a CPU load there is a driver matter, not ours.
+ */
+function noticeCpuRuntime(onError: (msg: string) => void): void {
+  if (cpuNoticeGiven || !isWindows) {
+    return;
+  }
+  cpuNoticeGiven = true;
+  void nvidiaDriver().then((driver) => {
+    if (driver) {
+      onError(
+        `Qwen3 is running on the CPU, although this machine has ${driver.gpu}: run "Set Up Qwen3 Engine" to install it again for the GPU.`
+      );
+    }
+  });
+}
 
 /** Cloned voices are stored as "clone:<slug>" in the voice setting. */
 export function isCloneVoice(voice: string): boolean {
@@ -563,6 +587,12 @@ export function qwen3Backend(
       {
         readyTimeoutMs: snapshot ? 600_000 : 1_800_000,
         logFile: path.join(path.dirname(voicesDir), "qwen3-daemon.log"),
+        onReady: (info) => {
+          pipelineLog(`qwen3: ready on ${typeof info.device === "string" ? info.device : "?"}`);
+          if (info.device === "cpu") {
+            noticeCpuRuntime(onError);
+          }
+        },
       }
     );
     return daemon;

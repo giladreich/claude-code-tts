@@ -9,6 +9,7 @@
  * through a command so this module needs to know nothing about it.
  */
 import { spawnSync } from "child_process";
+import * as fs from "fs";
 import * as vscode from "vscode";
 import { checkSetup, summarize } from "./diagnostics";
 import { appControlNotice } from "./onboarding";
@@ -33,12 +34,13 @@ import {
   missingTextPackages,
   resolveChatterboxRuntime,
 } from "../tts/chatterbox";
-import { listQwen3Clones, qwen3Available, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
+import { findQwen3Python, listQwen3Clones, qwen3Available, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
 import { audioSupport } from "../tts/wavPlayers";
 import { getPersistentPlayer } from "../tts/audio";
 import { MenuOutcome, pickWithBack } from "../ui/prompts";
 import { findUv, installPrivateUv, runUv, toolInstallArgs, UV_VERSION, UvInfo } from "../platform/uvBootstrap";
-import { hasCommand, isWindows, venvPython } from "../platform/platform";
+import { nvidiaDriver, torchCudaOf, torchHasCuda, torchIndexArgs, torchIndexFor, venvOf } from "../platform/gpu";
+import { hasCommand, isMac, isWindows, venvPython } from "../platform/platform";
 
 /** Where a person is sent to install the Piper program themselves. */
 const PIPER_INSTALL_URL = "https://github.com/OHF-Voice/piper1-gpl";
@@ -84,12 +86,22 @@ export async function applyMachineDefaults(): Promise<void> {
  * a comparison table, installs it with the flow that already knows how, and
  * ends where the point of it is: a voice of their own.
  */
-/** Whether this Windows will run the neural engines at all; asked of the registry once per session. */
-let appControlState: "on" | "evaluation" | "off" | "unknown" | undefined;
+/**
+ * Whether this Windows will run the neural engines right now. Read from the
+ * registry again after a short while rather than once per session: the
+ * setting can be switched either way on current Windows builds (verified on
+ * one), and a person who has just switched it off expects the next install
+ * to go ahead without reloading the window. Only "on" blocks; the
+ * evaluation period runs nothing through it yet.
+ */
+let appControlRead: { at: number; state: ReturnType<typeof windowsAppControl> } | undefined;
+const APP_CONTROL_TTL_MS = 30_000;
 
-export function neuralEnginesBlocked(): "on" | "evaluation" | undefined {
-  appControlState ??= windowsAppControl();
-  return appControlState === "on" || appControlState === "evaluation" ? appControlState : undefined;
+export function neuralEnginesBlocked(): boolean {
+  if (!appControlRead || Date.now() - appControlRead.at > APP_CONTROL_TTL_MS) {
+    appControlRead = { at: Date.now(), state: windowsAppControl() };
+  }
+  return appControlRead.state === "on";
 }
 
 /**
@@ -99,19 +111,23 @@ export function neuralEnginesBlocked(): "on" | "evaluation" | undefined {
  * the security setting; that is the person's or their administrator's call.
  */
 async function stoppedByAppControl(): Promise<boolean> {
-  const state = neuralEnginesBlocked();
-  if (!state) {
+  if (!neuralEnginesBlocked()) {
     return false;
   }
+  await offerBuiltInVoiceInstead();
+  return true;
+}
+
+/** The notice that the neural engines run only while Smart App Control is off, with the built-in voice one click away. */
+export async function offerBuiltInVoiceInstead(): Promise<void> {
   const CHOOSE = "Choose a built-in voice";
-  const pick = await vscode.window.showInformationMessage(`Claude Code TTS: ${appControlNotice(state)}`, CHOOSE);
+  const pick = await vscode.window.showInformationMessage(`Claude Code TTS: ${appControlNotice()}`, CHOOSE);
   if (pick === CHOOSE) {
     await vscode.workspace
       .getConfiguration("claudeCodeTts")
       .update("engine", "system", vscode.ConfigurationTarget.Global);
     await vscode.commands.executeCommand("claudeCodeTts.selectVoice");
   }
-  return true;
 }
 
 export async function setupBestVoiceFlow(): Promise<void> {
@@ -244,6 +260,11 @@ export async function checkSetupFlow(back = false): Promise<MenuOutcome> {
     qwen3Runtime: resolveQwen3Runtime(cfg.qwen3Runtime),
     chatterboxRuntime: resolveChatterboxRuntime(runtime.context.globalStorageUri.fsPath, cfg.chatterboxRuntime),
     chatterboxDiacritizer: diacritizerReady(runtime.context.globalStorageUri.fsPath, cfg.chatterboxRuntime),
+    // The GPU matters to the PyTorch runtimes only, and this is the report
+    // that may probe the machine.
+    gpu: isMac ? undefined : (await nvidiaDriver())?.gpu,
+    qwen3Cuda: torchCudaOf(findQwen3Python()),
+    chatterboxCuda: torchHasCuda(chatterboxVenv(runtime.context.globalStorageUri.fsPath)),
     listenTo: config().listenTo,
     terminalOwner: runtime.ownership?.isTerminalOwner() ?? true,
     windows: runtime.ownership?.windowCount() ?? 1,
@@ -355,6 +376,34 @@ export async function ensureUvWithConsent(purpose: string): Promise<UvInfo | und
     return undefined;
   }
   return findUv(storage);
+}
+
+/**
+ * Let go of the engine before its runtime is replaced: a daemon holds its
+ * Python and torch libraries open, and on Windows nothing can delete or
+ * overwrite a file another process has open, so a reinstall under a running
+ * daemon failed part-way and left the environment half-replaced. The engine
+ * is rebuilt afterwards by the activation that follows the install.
+ */
+async function releaseEngine(): Promise<void> {
+  runtime.speech?.stop();
+  runtime.speech?.rebuild();
+  await new Promise((r) => setTimeout(r, 500)); // the killed daemon's handles close
+}
+
+/**
+ * The uv arguments that fetch torch built for this machine's GPU, and a log
+ * line saying which; nothing on a machine where the default build fits.
+ */
+async function torchIndexForThisMachine(torch26 = false): Promise<string[]> {
+  const driver = await nvidiaDriver();
+  const index = torchIndexFor(driver, process.platform, torch26);
+  if (driver) {
+    runtime.output.appendLine(
+      `[install] NVIDIA driver for CUDA ${driver.cuda} (${driver.gpu}): ${index ? `torch from ${index}` : "the default torch build"}`
+    );
+  }
+  return torchIndexArgs(index);
 }
 
 /** Install a Python tool through uv with progress and a log; false when it did not succeed. */
@@ -575,6 +624,7 @@ export async function installChatterboxRuntime(ask: boolean): Promise<boolean> {
             "install",
             "--python",
             venvPython(venv),
+            ...(await torchIndexForThisMachine(true)),
             "chatterbox-tts==0.1.7",
             "setuptools<81",
             ...CHATTERBOX_TEXT_PACKAGES.map((p) => p.spec),
@@ -615,6 +665,26 @@ export async function setupChatterboxFlow(): Promise<boolean> {
   }
   const storage = runtime.context.globalStorageUri.fsPath;
   const installed = resolveChatterboxRuntime(storage);
+  if (installed === "torch" && torchHasCuda(chatterboxVenv(storage)) === false) {
+    // Built without the GPU this machine has: the environment is replaced
+    // by one whose torch comes from the index for that GPU.
+    const driver = await nvidiaDriver();
+    if (driver && torchIndexFor(driver, process.platform, true)) {
+      const go = await vscode.window.showInformationMessage(
+        `Claude Code TTS: Chatterbox is installed, but its PyTorch build runs on the CPU, far slower than speech; this machine has ${driver.gpu}. Install it again for the GPU? That rebuilds its isolated environment (about 3 GB).`,
+        { modal: true },
+        "Install for the GPU"
+      );
+      if (go !== "Install for the GPU") {
+        return false;
+      }
+      await releaseEngine();
+      fs.rmSync(chatterboxVenv(storage), { recursive: true, force: true });
+      if (!(await installChatterboxRuntime(false))) {
+        return false;
+      }
+    }
+  }
   if (installed) {
     const speed =
       installed === "mlx"
@@ -716,7 +786,25 @@ export async function setupQwen3Flow(): Promise<boolean> {
   return setupQwen3({
     log: (line) => runtime.output.appendLine(`[qwen3 setup] ${line}`),
     showLog: () => runtime.output.show(),
-    installTool: (pkg) => installTool(pkg, "Qwen3"),
+    // The PyTorch package gets the torch build for this machine's GPU,
+    // where PyPI's own would leave the model on the CPU.
+    installTool: async (pkg, extra = []) =>
+      installTool(
+        pkg,
+        "Qwen3",
+        pkg === "qwen-tts" && !extra.includes("--index") ? [...extra, ...(await torchIndexForThisMachine())] : extra
+      ),
+    releaseEngine,
+    gpuUpgrade: async () => {
+      const python = findQwen3Python();
+      const cuda = python ? torchHasCuda(venvOf(python)) : undefined;
+      if (cuda !== false) {
+        return undefined;
+      }
+      const driver = await nvidiaDriver();
+      const index = torchIndexFor(driver);
+      return driver && index ? { gpu: driver.gpu, extra: torchIndexArgs(index) } : undefined;
+    },
     modelDownload: qwen3ModelDownload(),
     activate: async () => {
       await applyMachineDefaults(); // before the engine switch: it decides which weights download

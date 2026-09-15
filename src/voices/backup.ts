@@ -9,7 +9,7 @@
  */
 
 import { execFile } from "child_process";
-import { hasCommand } from "../platform/platform";
+import { hasCommand, tarArchiveArg, tarDirArg } from "../platform/platform";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -23,9 +23,9 @@ export function backupsAvailable(): boolean {
   return hasCommand("tar");
 }
 
-function run(cmd: string, args: string[]): Promise<void> {
+function run(cmd: string, args: string[], cwd?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: 120_000, windowsHide: true }, (err, _o, stderr) =>
+    execFile(cmd, args, { timeout: 120_000, windowsHide: true, cwd }, (err, _o, stderr) =>
       err
         ? reject(
             new Error(
@@ -48,7 +48,8 @@ export async function exportVoices(voicesDir: string, slugs: string[], destFile:
   if (valid.length === 0) {
     throw new Error("no voice profiles to export");
   }
-  await run("tar", ["-czf", destFile, "-C", voicesDir, ...valid]);
+  const dest = tarArchiveArg(destFile);
+  await run("tar", ["-czf", dest.file, "-C", tarDirArg(voicesDir), ...valid], dest.cwd);
   return valid.length;
 }
 
@@ -70,7 +71,8 @@ export async function importVoices(voicesDir: string, srcFile: string): Promise<
   }
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "claude-code-tts-import-"));
   try {
-    await run("tar", ["-xzf", srcFile, "-C", staging]);
+    const src = tarArchiveArg(srcFile);
+    await run("tar", ["-xzf", src.file, "-C", tarDirArg(staging)], src.cwd);
     const out: ImportedVoice[] = [];
     fs.mkdirSync(voicesDir, { recursive: true });
     for (const entry of fs.readdirSync(staging)) {

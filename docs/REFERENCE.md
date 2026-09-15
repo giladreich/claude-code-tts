@@ -238,7 +238,7 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 | Capability | macOS | Linux | Windows |
 |---|---|---|---|
 | System voice (`say` / `espeak-ng` / `System.Speech`) | yes | yes | yes |
-| Kokoro, Piper, Qwen3, Chatterbox engines | yes | yes | yes (Qwen3 needs `qwen-tts` and Chatterbox its own virtualenv; MLX is Apple-only) |
+| Kokoro, Piper, Qwen3, Chatterbox engines | yes | yes | yes (Qwen3 needs `qwen-tts` and Chatterbox its own virtualenv; MLX is Apple-only; with an NVIDIA GPU the setup installs the PyTorch build that uses it, since the one PyPI ships for Windows runs on the CPU) |
 | Gapless streaming playback, first audio in ~0.5s | yes (bundled player) | no: audio plays per utterance | no: per utterance |
 | Pitch-preserving rate and live rate change | yes | with `ffplay` or `sox` installed | with `ffplay` (from ffmpeg) |
 | Rate without any of those | yes | Kokoro and Piper hit the rate natively; Qwen3 and Chatterbox cannot | same |
@@ -252,7 +252,7 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 
 Run **Claude Code TTS: Check Setup** to see which of these apply on your machine; a Python tool it lists as missing installs from right there. Installing `ffmpeg` is the one step that brings Linux and Windows close to parity, and the only one the extension asks you to run yourself (it needs your package manager): the prompt opens a terminal with the command typed for you to confirm, for the package manager the machine has (apt, dnf, pacman, zypper, Homebrew, winget). On Windows, restart VSCode after a winget install: the editor's PATH is read when it starts.
 
-On a Windows with Smart App Control on (the default on a new Windows 11 install), the neural engines are not installed: they are built from open-source components Windows will not load while it is on, so the guided setup and the engine list say so up front and the built-in voice stays. The setting is the person's, or their administrator's; the extension does not ask for it to be changed.
+On a Windows with Smart App Control on (the default on a new Windows 11 install), the neural engines are not installed: they are built from open-source components Windows will not load while it is on, so the guided setup and the engine list say so up front and the built-in voice stays: the neural engines run only while the setting is off. The setting is the person's, or their administrator's; the extension states the condition and does not ask for it to be changed. When it is switched on with an engine already installed, that engine fails at its next load with the reason explained; switched off again, the engine works without a reload.
 
 Behind a proxy, downloads use VSCode's `http.proxy` setting, or `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from the environment. On Linux under VSCode before 1.90 the editor's Node cannot watch a directory tree, so transcripts are found by scanning every two seconds instead of at once.
 

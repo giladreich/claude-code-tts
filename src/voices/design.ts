@@ -32,6 +32,8 @@ import {
   qwen3VoicesDir,
 } from "../tts/qwen3";
 import { explainPlatformError } from "../platform/platform";
+import { fractionOf, progressText } from "../platform/modelProgress";
+import { claimDownloadNotice, downloadProgress } from "../ui/statusBar";
 import { BACK, Back, inputWithBack, pickWithPreview } from "../ui/prompts";
 import { playWavFile } from "../tts/wavPlayers";
 import { normalizeReference, trimSilence } from "../tts/wav";
@@ -122,11 +124,46 @@ export function render(
       location: vscode.ProgressLocation.Notification,
       title: cached
         ? "Claude Code TTS: designing the voice (about half a minute)..."
-        : "Claude Code TTS: fetching the voice designer's own model (~4.2 GB, one-time; the status bar counts it down), then designing the voice...",
+        : "Claude Code TTS: designing the voice",
       cancellable: true,
     },
-    (_progress, token) =>
+    (progress, token) =>
       new Promise((resolve) => {
+        // The first design fetches the designer's own model, a wait of
+        // minutes: this notification carries how far it is (the bytes, the
+        // percentage, the bar) rather than pointing at the status bar.
+        const release = cached ? undefined : claimDownloadNotice();
+        let reported = 0;
+        const tick = () => {
+          const p = downloadProgress();
+          if (!p) {
+            if (reported === 0) {
+              progress.report({ message: "fetching its own model first (~4.2 GB, once)..." });
+            }
+            return;
+          }
+          const done = fractionOf(p);
+          const percent = done === undefined ? 0 : Math.round(done * 100);
+          progress.report({
+            message:
+              done !== undefined && done >= 0.999
+                ? "model fetched; loading it and rendering (about half a minute)..."
+                : `fetching its own model, ${progressText(p)}`,
+            increment: Math.max(0, percent - reported),
+          });
+          reported = Math.max(reported, percent);
+        };
+        const ticker = cached ? undefined : setInterval(tick, 2000);
+        if (!cached) {
+          tick();
+        }
+        const finish = (result: { ok: boolean; error?: string }) => {
+          if (ticker) {
+            clearInterval(ticker);
+          }
+          release?.();
+          resolve(result);
+        };
         const cfg = { model_id: snapshot ?? id, instruct, text: passage, language, out };
         const proc = spawn(python, [script, JSON.stringify(cfg)], {
           stdio: ["ignore", "pipe", "pipe"],
@@ -144,12 +181,12 @@ export function render(
           try {
             const last = stdout.trim().split("\n").pop() ?? "";
             const msg = JSON.parse(last);
-            resolve({ ok: msg.ok === true, error: msg.error ? String(msg.error) : undefined });
+            finish({ ok: msg.ok === true, error: msg.error ? String(msg.error) : undefined });
           } catch {
-            resolve({ ok: false, error: token.isCancellationRequested ? "cancelled" : `exited with ${code}` });
+            finish({ ok: false, error: token.isCancellationRequested ? "cancelled" : `exited with ${code}` });
           }
         });
-        proc.on("error", (e) => resolve({ ok: false, error: e.message }));
+        proc.on("error", (e) => finish({ ok: false, error: e.message }));
       })
   );
 }

@@ -24,12 +24,15 @@ export type RecommendedEngine = "qwen3" | "chatterbox" | "kokoro";
  * off looks like the thing the feature exists to stop, and Microsoft warns
  * the switch is one way.
  */
-export function appControlNotice(state: "on" | "evaluation"): string {
-  const because =
-    state === "on"
-      ? "Windows Smart App Control is on."
-      : "Windows Smart App Control is still in its evaluation period, which blocks the same programs.";
-  return `${because} It blocks programs not signed by a known publisher, and every neural voice engine here is built from open-source components that are not, so none of them can run on this machine while it is on. The built-in Windows voice works as it is, and Claude Code TTS keeps using it. The setting is under Windows Security > App & browser control, and Microsoft warns it cannot be turned on again once it is off; on a work machine it is your administrator's.`;
+/**
+ * Said when Smart App Control is on and a neural engine is asked for. It
+ * states the condition (the engines run only while the setting is off) and
+ * where the setting lives, and asks for nothing: whether to change a
+ * security setting is the person's call, or their administrator's. Only
+ * "on" blocks: the evaluation period runs nothing through it yet.
+ */
+export function appControlNotice(): string {
+  return "Windows Smart App Control is on. It runs only programs signed by a known publisher, and the neural voice engines here are built from open-source components that are not, so they can run only while it is off. The built-in Windows voice is signed and keeps working, and Claude Code TTS keeps using it. The setting is under Windows Security > App & browser control > Smart App Control; on a managed machine it is your administrator's.";
 }
 
 /** What this computer can be asked to do, in the terms the choices need. */

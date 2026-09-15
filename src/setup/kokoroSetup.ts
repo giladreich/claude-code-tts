@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import { tarArchiveArg, tarDirArg } from "../platform/platform";
 import { KOKORO_MODEL_ID, kokoroReady, SHERPA_VERSION, sherpaPlatform } from "../tts/kokoro";
 import { download } from "../tts/net";
 
@@ -11,7 +12,12 @@ const MODEL_MB = 335;
 function extractTarBz2(archive: string, destDir: string): Promise<void> {
   // bsdtar ships with macOS and Windows 10+; GNU tar covers Linux.
   return new Promise((resolve, reject) => {
-    const proc = spawn("tar", ["xjf", archive, "-C", destDir], { stdio: "ignore", windowsHide: true });
+    const arg = tarArchiveArg(archive);
+    const proc = spawn("tar", ["xjf", arg.file, "-C", tarDirArg(destDir)], {
+      cwd: arg.cwd,
+      stdio: "ignore",
+      windowsHide: true,
+    });
     proc.on("error", reject);
     proc.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`tar exited with ${code}`))));
   });

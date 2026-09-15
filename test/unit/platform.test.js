@@ -366,4 +366,33 @@ test("Windows refusing an unsigned library is explained with the way out, and Ch
     checkSetup({ ...diagnosticsBase(), appControl: "off" }).find((r) => r.name === "Windows Smart App Control"),
     undefined
   );
+  // The evaluation period blocks nothing yet: a note, not a warning.
+  const evaluation = checkSetup({ ...diagnosticsBase(), appControl: "evaluation" }).find(
+    (r) => r.name === "Windows Smart App Control"
+  );
+  assert.equal(evaluation.status, "ok");
+  assert.match(evaluation.detail, /nothing is blocked yet/);
+  assert.match(row.detail, /only while it is off/, "the condition, stated");
+  assert.doesNotMatch(row.detail, /turned on again/);
+});
+
+test("an archive is handed to tar by name from its own directory, never with a drive letter", () => {
+  // GNU tar reads "C:" in an archive name as a host to connect to.
+  const { tarArchiveArg } = require("../../out/platform/platform.js");
+  const os = require("os");
+  const archive = path.join(os.tmpdir(), "voices.cvvoices.tgz");
+  const arg = tarArchiveArg(archive);
+  assert.equal(arg.file, "voices.cvvoices.tgz");
+  assert.ok(!arg.file.includes(":"));
+  assert.equal(path.join(arg.cwd, arg.file), archive);
+});
+
+test("a directory is handed to tar with forward slashes, which it does not unescape", () => {
+  // GNU tar turns "\t" in the directory of -C into a tab: every private uv
+  // unpack directory ends in "\uv\tmp" (measured: "Cannot open").
+  const { tarDirArg } = require("../../out/platform/platform.js");
+  const dir = ["C:", "Users", "tom", "uv", "tmp"].join(path.sep);
+  const arg = tarDirArg(dir);
+  assert.ok(!arg.includes("\\"), arg);
+  assert.equal(arg.split("/").join(path.sep), dir);
 });

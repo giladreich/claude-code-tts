@@ -208,7 +208,7 @@ export function packageInstallCommand(pkg: string): string {
  * user's, or their administrator's.
  */
 export const WINDOWS_APP_CONTROL_HINT =
-  "Windows refused to load a program file that is not signed by a known publisher. That is Smart App Control (or, on a managed machine, an App Control for Business policy) doing its job: every neural voice engine here is built from open-source components that are not signed, so none of them can run while it is on. The built-in Windows voice is signed by Microsoft and keeps working. The setting itself is yours (Windows Security > App & browser control) or your administrator's; Microsoft warns that Smart App Control cannot be turned on again once turned off.";
+  "Windows refused to load a program file not signed by a known publisher: Smart App Control, or on a managed machine an App Control for Business policy. Every neural voice engine here is built from open-source components that are not signed, so they run only while it is off; the built-in Windows voice is signed by Microsoft and keeps working. The setting is under Windows Security > App & browser control > Smart App Control, or your administrator's.";
 
 /** An engine's error, with the reason and the way out added where Windows caused it. */
 export function explainPlatformError(message: string): string {
@@ -278,4 +278,29 @@ export function resolveNodeCommand(opts: {
   // The editor's own binary is node with a flag; on Windows a shell cannot
   // carry the variable in front of the command, so the bare name stays.
   return opts.platform === "win32" ? "node" : `ELECTRON_RUN_AS_NODE=1 ${shellQuote(opts.electron)}`;
+}
+
+/**
+ * How an archive is handed to tar: by name, from its own directory.
+ *
+ * GNU tar reads a colon in the archive name as "host:file" and tries to
+ * reach the host, so on a Windows where Git's tar comes before the system
+ * one on PATH (it did, on the machine this was found on) every archive
+ * under a drive letter failed with "Cannot connect to C:". The tar Windows
+ * ships has no --force-local to turn that off, so the name is kept free of
+ * the drive instead; the -C directory may carry one, both tars take it.
+ */
+export function tarArchiveArg(archive: string): { file: string; cwd: string } {
+  return { file: path.basename(archive), cwd: path.dirname(archive) };
+}
+
+/**
+ * A directory as tar is given it: with forward slashes. GNU tar unescapes
+ * backslash sequences in the directory of -C when it extracts, so a Windows
+ * path with "\t" in it reached it with a tab inside: every private uv unpack
+ * directory ends in "\uv\tmp", and a home folder can start with any escape
+ * letter ("\tom", "\nina"). Both tars take forward slashes on Windows.
+ */
+export function tarDirArg(dir: string): string {
+  return path.normalize(dir).split(path.sep).join("/");
 }

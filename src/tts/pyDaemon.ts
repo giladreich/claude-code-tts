@@ -17,6 +17,8 @@ export interface PyDaemonOptions {
   env?: Record<string, string>;
   /** Append the daemon's stderr here (model load progress, tracebacks). */
   logFile?: string;
+  /** The daemon's "ready" line, with whatever it reports about itself (the device it loaded on). */
+  onReady?: (info: Record<string, unknown>) => void;
 }
 
 /**
@@ -133,6 +135,11 @@ export class PyTtsDaemon {
         return; // libraries sometimes chat on stdout; ignore non-protocol lines
       }
       if (msg.ready) {
+        try {
+          opts.onReady?.(msg);
+        } catch {
+          /* a listener's mistake must not stop the daemon from being ready */
+        }
         return readyResolve();
       }
       // Any answer at all proves the daemon is alive and working, so every

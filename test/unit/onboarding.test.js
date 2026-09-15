@@ -189,7 +189,9 @@ test("the faster engine wins wherever it can say what is being spoken", () => {
 
 test("the notice about Windows blocking the neural engines names what still works", () => {
   const { appControlNotice } = require("../../out/setup/onboarding.js");
-  for (const state of ["on", "evaluation"]) {
-    assert.match(appControlNotice(state), /built-in Windows voice/);
-  }
+  const notice = appControlNotice();
+  assert.match(notice, /built-in Windows voice/);
+  assert.match(notice, /only while it is off/, "the condition, stated");
+  assert.doesNotMatch(notice, /turn(ed)? (it )?off/i, "never an instruction to change a security setting");
+  assert.doesNotMatch(notice, /cannot be turned on again/, "not a claim about Windows that current builds contradict");
 });

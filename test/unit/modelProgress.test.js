@@ -210,3 +210,33 @@ test("two downloads at once are added up, not shown one instead of the other", (
 
   assert.deepEqual(combine([]), { bytes: 0, expected: 0, count: 0 });
 });
+
+test("where the cache carries no listing, the hub's listing gives the total, summed over its files", () => {
+  const { totalOfListing, hubTreeUrl, modelIdOf } = require("../../out/platform/modelProgress.js");
+  assert.equal(modelIdOf("models--Qwen--Qwen3-TTS-12Hz-1.7B-VoiceDesign"), "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign");
+  assert.equal(
+    hubTreeUrl("models--Qwen--Qwen3-TTS-12Hz-1.7B-VoiceDesign"),
+    "https://huggingface.co/api/models/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign/tree/main?recursive=true"
+  );
+  // The shape the hub answers with: directories weigh nothing, LFS files carry their size twice.
+  const listing = [
+    { type: "directory", size: 0, path: "speech_tokenizer" },
+    { type: "file", size: 4421, path: "config.json" },
+    { type: "file", size: 3833402552, lfs: { size: 3833402552 }, path: "model.safetensors" },
+  ];
+  assert.equal(totalOfListing(listing), 3833402552 + 4421);
+  assert.equal(totalOfListing({ error: "not found" }), undefined);
+  assert.equal(totalOfListing([]), undefined);
+});
+
+test("the listing is asked of the endpoint the runtime uses, a mirror included", () => {
+  const { hubTreeUrl } = require("../../out/platform/modelProgress.js");
+  assert.equal(
+    hubTreeUrl("models--Qwen--X", "https://hf-mirror.example/"),
+    "https://hf-mirror.example/api/models/Qwen/X/tree/main?recursive=true"
+  );
+  assert.equal(
+    hubTreeUrl("models--Qwen--X", undefined),
+    "https://huggingface.co/api/models/Qwen/X/tree/main?recursive=true"
+  );
+});

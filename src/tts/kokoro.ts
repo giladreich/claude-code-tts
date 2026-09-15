@@ -25,15 +25,21 @@ export const KOKORO_MODEL_ID = "kokoro-multi-lang-v1_0";
 /** Older English-only model; still used when it's the only one installed. */
 export const KOKORO_MODEL_LEGACY = "kokoro-en-v0_19";
 
-/** sherpa-onnx release asset platform suffix for this machine. */
+/**
+ * sherpa-onnx release asset platform suffix for this machine. The names are
+ * the release's own (checked against v1.13.7's asset list): Windows ships
+ * only CRT-flavoured builds ("MD-Release", the dynamic runtime every
+ * Windows has), and the plain "win-x64-shared" the setup asked for was a
+ * 404 on a fresh install; Linux on ARM ships a "-cpu" build.
+ */
 export function sherpaPlatform(): string | undefined {
   const key = `${process.platform}-${process.arch}`;
   const map: Record<string, string> = {
     "darwin-arm64": "osx-arm64-shared",
     "darwin-x64": "osx-x64-shared",
     "linux-x64": "linux-x64-shared",
-    "linux-arm64": "linux-aarch64-shared",
-    "win32-x64": "win-x64-shared",
+    "linux-arm64": "linux-aarch64-shared-cpu",
+    "win32-x64": "win-x64-shared-MD-Release",
   };
   return map[key];
 }

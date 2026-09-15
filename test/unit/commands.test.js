@@ -55,8 +55,9 @@ cp.spawnSync = (cmd, args = [], _opts) => {
   // `which`-style probes must answer "not installed" rather than crash.
   return { status: 1, signal: null, stdout: "", stderr: "", pid: 1, output: ["", "", ""], error: undefined };
 };
-cp.exec = (_cmd, _opts, done) => {
-  const cb = typeof _opts === "function" ? _opts : done;
+cp.exec = (_cmd, ...rest) => {
+  // exec(cmd, cb), exec(cmd, opts, cb) and execFile(cmd, args, opts, cb): the callback is whichever is a function.
+  const cb = rest.find((r) => typeof r === "function");
   setImmediate(() => cb?.(null, "", ""));
   return new EventEmitter();
 };

@@ -200,12 +200,12 @@ test("the privacy audit's countable claims are true", () => {
     // spells them, and path.relative answers with backslashes on Windows.
     if (/from "\.{1,2}\/(tts\/)?net"/.test(body)) importers.add(path.relative(ROOT, file).split(path.sep).join("/"));
   }
-  const written = { 4: "Four", 5: "Five", 6: "Six", 7: "Seven" }[urls.size];
+  const written = { 4: "Four", 5: "Five", 6: "Six", 7: "Seven", 8: "Eight" }[urls.size];
   assert.ok(
     privacy.includes(`${written} URLs exist`),
     `PRIVACY.md must say "${written} URLs exist"; the tree has ${urls.size}: ${[...urls].join(", ")}`
   );
-  const count = { 2: "two", 3: "three", 4: "four" }[importers.size];
+  const count = { 2: "two", 3: "three", 4: "four", 5: "five" }[importers.size];
   assert.ok(
     privacy.includes(`imported by exactly ${count} files`),
     `PRIVACY.md must say the HTTP client is imported by exactly ${count} files: ${[...importers].join(", ")}`

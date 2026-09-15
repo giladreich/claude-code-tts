@@ -22,7 +22,7 @@ import { createHash } from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { exe, hasCommand, isWindows, userScriptDirs } from "./platform";
+import { exe, hasCommand, isWindows, tarArchiveArg, tarDirArg, userScriptDirs } from "./platform";
 import { download } from "../tts/net";
 
 /** Pinned. Bumping it makes the next setup fetch the new release. */
@@ -204,7 +204,12 @@ export async function installPrivateUv(
     }
     onProgress("unpacking");
     // tar handles both archives: bsdtar, which Windows 10 ships, opens zip too.
-    const tar = spawnSync("tar", ["-xf", archive, "-C", tmp], { stdio: "ignore", windowsHide: true });
+    const arg = tarArchiveArg(archive);
+    const tar = spawnSync("tar", ["-xf", arg.file, "-C", tarDirArg(tmp)], {
+      cwd: arg.cwd,
+      stdio: "ignore",
+      windowsHide: true,
+    });
     if (tar.status !== 0) {
       throw new Error("could not unpack the uv archive (tar failed)");
     }

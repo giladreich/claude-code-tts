@@ -104,7 +104,7 @@ export async function selectEngine(back = false): Promise<MenuOutcome> {
   ];
   // A Windows that will not run the neural engines says so on each of them,
   // rather than after a download; the setup flows stop as well.
-  const blocked = neuralEnginesBlocked() ? "Not on this machine: Windows Smart App Control blocks it. " : "";
+  const blocked = neuralEnginesBlocked() ? "Runs only while Windows Smart App Control is off. " : "";
   const ordered = [...engines].sort((a, b) => Number(b.id === recommended) - Number(a.id === recommended));
   const picked = await pickWithBack(
     ordered.map((e) => ({
