@@ -2,6 +2,7 @@ import { ChildProcess, spawn } from "child_process";
 import { pythonEnv } from "../platform/platform";
 import * as fs from "fs";
 import * as readline from "readline";
+import { StringDecoder } from "string_decoder";
 
 export interface PyDaemonOptions {
   /** Kill and report if "ready" has not arrived by then (model load hang). */
@@ -17,6 +18,8 @@ export interface PyDaemonOptions {
   env?: Record<string, string>;
   /** Append the daemon's stderr here (model load progress, tracebacks). */
   logFile?: string;
+  /** The daemon's "ready" line, with whatever it reports about itself (the device it loaded on). */
+  onReady?: (info: Record<string, unknown>) => void;
 }
 
 /**
@@ -74,8 +77,36 @@ export class PyTtsDaemon {
         } catch {}
         fs.appendFileSync(log, `${new Date().toISOString()} start ${python} ${script}\n`);
       } catch {}
-      this.proc.stderr?.on("data", (d) => fs.appendFile(log, String(d), () => {}));
+      // One open stream rather than an appendFile per chunk: those ran on
+      // the thread pool in whatever order it got to them, so a traceback
+      // could land in the log out of sequence, and each cost an open and a
+      // close for a few bytes of progress output.
+      const stream = fs.createWriteStream(log, { flags: "a" });
+      stream.on("error", () => {});
+      // The line that starts each read is stamped with the time: the log
+      // said what happened and never when, so a part that reached the
+      // player long after the daemon wrote it could not be placed from
+      // either side. Progress bars redraw a line without ending it and keep
+      // their one stamp. Decoded statefully: a read can end inside a
+      // multi-byte character, which String() turns into two replacement
+      // marks.
+      const decoder = new StringDecoder("utf8");
+      let lineStart = true;
+      this.proc.stderr?.on("data", (d: Buffer) => {
+        const s = decoder.write(d);
+        if (!s) {
+          return;
+        }
+        stream.write(lineStart ? `${new Date().toISOString()} ${s}` : s);
+        lineStart = s.endsWith("\n");
+      });
+      // "close", not "exit": stderr can still deliver after the process has
+      // exited, and the last lines of a traceback are the exception itself.
+      this.proc.on("close", () => stream.end());
     }
+    // A write into a daemon that has just died raises on the pipe, not on
+    // the process; unhandled, that is an exception in the extension host.
+    this.proc.stdin?.on("error", () => {});
     let readyResolve!: () => void;
     let readyReject!: (e: Error) => void;
     this.ready = new Promise<void>((res, rej) => ((readyResolve = res), (readyReject = rej)));
@@ -121,6 +152,11 @@ export class PyTtsDaemon {
         return; // libraries sometimes chat on stdout; ignore non-protocol lines
       }
       if (msg.ready) {
+        try {
+          opts.onReady?.(msg);
+        } catch {
+          /* a listener's mistake must not stop the daemon from being ready */
+        }
         return readyResolve();
       }
       // Any answer at all proves the daemon is alive and working, so every
@@ -169,10 +205,11 @@ export class PyTtsDaemon {
   request(
     payload: Record<string, unknown>,
     onPart?: (file: string, final: boolean) => void
-  ): { promise: Promise<any>; cancel: () => void } {
+  ): { promise: Promise<any>; cancel: () => void; hot: () => void } {
     const id = this.nextId++;
     let sent = false;
     let cancelled = false;
+    let wanted = false;
     const promise = this.ready.then(
       () =>
         new Promise<any>((resolve, reject) => {
@@ -186,6 +223,9 @@ export class PyTtsDaemon {
           this.touch(id);
           sent = true;
           this.proc.stdin!.write(JSON.stringify({ id, ...payload }) + "\n");
+          if (wanted) {
+            this.proc.stdin!.write(JSON.stringify({ hot: id }) + "\n");
+          }
         })
     );
     return {
@@ -198,6 +238,20 @@ export class PyTtsDaemon {
         if (sent && this.alive && this.pending.has(id)) {
           try {
             this.proc.stdin!.write(JSON.stringify({ cancel: id }) + "\n");
+          } catch {}
+        }
+      },
+      // The request is being played now: a daemon that generates several
+      // requests together streams this one's audio from here on (see
+      // assets/qwen3_daemon.py); the others take no notice of the message.
+      hot: () => {
+        if (wanted || cancelled) {
+          return;
+        }
+        wanted = true;
+        if (sent && this.alive && this.pending.has(id)) {
+          try {
+            this.proc.stdin!.write(JSON.stringify({ hot: id }) + "\n");
           } catch {}
         }
       },

@@ -17,8 +17,8 @@ import {
   removeHooks,
   syncNotifyRuntime,
 } from "./setup/notifySetup";
-import { setExtraUvToolsDir } from "./platform/platform";
-import { NUDGE_AFTER, shouldNudge } from "./setup/onboarding";
+import { explainPlatformError, setExtraUvToolsDir } from "./platform/platform";
+import { appControlNotice, NUDGE_AFTER, shouldNudge } from "./setup/onboarding";
 import * as os from "os";
 import { clipboardTarget } from "./session/selection";
 import { defaultArgosDir, defaultExtensionsDir, defaultHfHome, ScanOptions } from "./platform/storage";
@@ -80,6 +80,8 @@ import {
   setupBestVoiceFlow,
   setupChatterboxFlow,
   setupKokoroFlow,
+  neuralEnginesBlocked,
+  offerBuiltInVoiceInstead,
   setupQwen3Flow,
 } from "./setup/setupFlows";
 import { clearAllSettings, removeEverythingFlow } from "./setup/uninstall";
@@ -405,6 +407,38 @@ function scanOptions(): ScanOptions {
 }
 
 /** Restart the engine after its model files were removed. */
+/** The notice was given while the setting was on; given again once it has been off in between. */
+let noticedAppControl = false;
+/** When the registry was last asked from the speaking path; a spawn of `reg` costs 12-45 ms here. */
+let appControlAskedAt = 0;
+const APP_CONTROL_ASK_MS = 5 * 60_000;
+
+/**
+ * Said the moment a neural engine is asked to speak on a Windows where
+ * Smart App Control is on, rather than a minute later when its runtime
+ * fails to load (the block stalls the first import for most of a minute
+ * before it fails). Off the activation path: this runs as Claude writes,
+ * and asks the registry a few times an hour at most.
+ */
+function noticeIfBlockedByAppControl(engine: string): void {
+  if (engine === "system" || process.platform !== "win32") {
+    return;
+  }
+  if (Date.now() - appControlAskedAt < APP_CONTROL_ASK_MS) {
+    return;
+  }
+  appControlAskedAt = Date.now();
+  if (!neuralEnginesBlocked()) {
+    noticedAppControl = false;
+    return;
+  }
+  if (!noticedAppControl) {
+    noticedAppControl = true;
+    runtime.output.appendLine(`[engine] ${appControlNotice()}`);
+    void offerBuiltInVoiceInstead();
+  }
+}
+
 function rebuildEngine(): void {
   // Was: set a fake value into qwen3Style and set it back, so that the
   // settings comparison saw an engine change. That trick stopped working
@@ -439,7 +473,8 @@ export function activate(context: vscode.ExtensionContext): void {
   setExtraUvToolsDir(privateUvToolsDir(context.globalStorageUri.fsPath));
   runtime.output = vscode.window.createOutputChannel("Claude Code TTS");
   background("settings migration", () => carryOldSettingsForward());
-  runtime.onError = (msg: string) => {
+  runtime.onError = (message: string) => {
+    const msg = explainPlatformError(message);
     runtime.output.appendLine(`[error] ${msg}`);
     if (msg.startsWith(TEXT_PREP_NEEDED)) {
       // The words being spoken are not the words that were written, and one
@@ -456,7 +491,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     // Engine failures must not be silent: surface daemon/setup problems once a minute.
     if (
-      /daemon|not set up|synthesis failed|no WAV player|playback|no built-in voice/i.test(msg) &&
+      /daemon|not set up|synthesis failed|no WAV player|playback|no built-in voice|on the CPU/i.test(msg) &&
       Date.now() - lastEngineWarningAt > 60_000
     ) {
       lastEngineWarningAt = Date.now();
@@ -483,7 +518,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Downloads go through the proxy the editor is configured for, when one is.
   setProxySetting(() => vscode.workspace.getConfiguration("http").get<string>("proxy") || undefined);
   // Keep the hook script, hook entries, and config current across updates,
-  // and install them the first time: completion sounds are on by default, and
+  // and install them the first time: notification sounds are on by default, and
   // they only work through Claude Code's own hooks. The script removes them
   // again when it finds this extension uninstalled.
   if (config().notifications.enabled) {
@@ -491,7 +526,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (hooksInstalled(context)) {
       ensureHooksCurrent(context, config().notifications);
     } else {
-      background("completion sounds", () => installDefaultHooks());
+      background("notification sounds", () => installDefaultHooks());
     }
   }
   background("language offer", () => offerDirectLanguages());
@@ -580,6 +615,7 @@ export function activate(context: vscode.ExtensionContext): void {
         !(cfg.onlyWhenUnfocused && vscode.window.state.focused) &&
         line.includes('"type":"assistant"')
       ) {
+        noticeIfBlockedByAppControl(cfg.speechConfig.engine);
         runtime.speech?.wake();
       }
       // A prompt starts a new message: what is spoken for this session until
@@ -643,7 +679,7 @@ export function activate(context: vscode.ExtensionContext): void {
       for (const u of speakable) {
         const text = applySubstitutions(u.text, cfg.substitutions);
         runtime.output.appendLine(`[speak ${u.kind} @${runtime.speech!.currentRate()}wpm] ${text}`);
-        speakLine(text, group);
+        speakLine(text, group, u.kind === "tool");
       }
       countSpoken(speakable.length);
       updateStatus();
@@ -824,13 +860,13 @@ export function activate(context: vscode.ExtensionContext): void {
         syncNotifyRuntime(runtime.context, { ...config().notifications, enabled: true }, runtime.onError);
         demoSound(runtime.context);
         vscode.window.showInformationMessage(
-          "Claude Code TTS: completion sounds enabled (that was the sound). If you also run the Claude Notifier extension, disable it to avoid duplicates."
+          "Claude Code TTS: notification sounds enabled (that was the sound). If you also run the Claude Notifier extension, disable it to avoid duplicates."
         );
       } else {
         removeHooks(runtime.context);
         await c.update("notifications.enabled", false, vscode.ConfigurationTarget.Global);
         syncNotifyRuntime(runtime.context, { ...config().notifications, enabled: false }, runtime.onError);
-        vscode.window.showInformationMessage("Claude Code TTS: completion sounds disabled and hooks removed.");
+        vscode.window.showInformationMessage("Claude Code TTS: notification sounds disabled and hooks removed.");
       }
     }),
     vscode.commands.registerCommand("claudeCodeTts.repeatLast", () => {

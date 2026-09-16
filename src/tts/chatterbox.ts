@@ -35,7 +35,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { ENGINE_LANGUAGES, languageName } from "../language/language";
+import { hubDir } from "../platform/modelProgress";
 import { sitePackageExists, uvToolPython, venvPython } from "../platform/platform";
+import { CHATTERBOX_MODELS } from "../platform/storage";
 import { PyTtsDaemon } from "./pyDaemon";
 import { CloneProfile, listQwen3Clones } from "./qwen3";
 import { StreamTask, SynthTask, synthesizeThenPlayBackend } from "./synthPlay";
@@ -96,10 +98,45 @@ const CHATTERBOX_LOOKAHEAD = 6;
  * Together they cost about 50 ms per sentence against 1.4 seconds of
  * synthesis.
  */
-export const CHATTERBOX_TEXT_PACKAGES: { spec: string; module: string }[] = [
-  { spec: "nakdimon==0.2.1", module: "nakdimon" },
+export const CHATTERBOX_TEXT_PACKAGES: { spec: string; module: string; needs?: string[] }[] = [
+  // nakdimon's own list asks for numpy 2.1 while chatterbox-tts 0.1.7 on
+  // Python 3.12 holds numpy below 2, and the resolver refused the pair
+  // ("no solution found"). It runs on numpy 1.26 (checked: the vowel marks
+  // come out), so it is installed without its dependency list and with
+  // what it uses at run time named here instead (Flask, which its list
+  // also asks for, serves its web demo and is never imported; requests
+  // arrives with the engine, and named here it clashed with the old one
+  // PyTorch's own index carries, which uv holds to for that index).
+  { spec: "nakdimon==0.2.1", module: "nakdimon", needs: ["onnxruntime>=1.20", "prettytable>=3.10"] },
   { spec: "num2words>=0.5.14", module: "num2words" },
 ];
+
+/**
+ * The `uv pip install` argument lists that put `packages` (entries of
+ * CHATTERBOX_TEXT_PACKAGES) into the interpreter at `python`, together with
+ * `alongside`: everything resolved together first, then the packages that
+ * must not bring their own dependency list.
+ */
+export function textPackageInstalls(
+  python: string,
+  packages: { spec: string; needs?: string[] }[],
+  alongside: string[] = []
+): string[][] {
+  const resolved = [
+    ...alongside,
+    ...packages.filter((p) => !p.needs).map((p) => p.spec),
+    ...packages.flatMap((p) => p.needs ?? []),
+  ];
+  const bare = packages.filter((p) => p.needs).map((p) => p.spec);
+  const steps: string[][] = [];
+  if (resolved.length > 0) {
+    steps.push(["pip", "install", "--python", python, ...resolved]);
+  }
+  if (bare.length > 0) {
+    steps.push(["pip", "install", "--python", python, "--no-deps", ...bare]);
+  }
+  return steps;
+}
 
 /** Is this module importable in the runtime Chatterbox resolves to here? */
 function runtimeHasModule(globalStoragePath: string, pref: string, module: string): boolean {
@@ -128,13 +165,14 @@ export function diacritizerReady(globalStoragePath: string, pref = "auto"): bool
  * vowels are not written came out as other words. Empty when no runtime is
  * installed: there is nothing to add them to yet.
  */
-export function missingTextPackages(globalStoragePath: string, pref = "auto"): string[] {
+export function missingTextPackages(
+  globalStoragePath: string,
+  pref = "auto"
+): { spec: string; module: string; needs?: string[] }[] {
   if (!resolveChatterboxRuntime(globalStoragePath, pref)) {
     return [];
   }
-  return CHATTERBOX_TEXT_PACKAGES.filter((p) => !runtimeHasModule(globalStoragePath, pref, p.module)).map(
-    (p) => p.spec
-  );
+  return CHATTERBOX_TEXT_PACKAGES.filter((p) => !runtimeHasModule(globalStoragePath, pref, p.module));
 }
 
 /** The interpreter of the runtime resolved here, to install into. */
@@ -199,6 +237,34 @@ export function chatterboxLanguageFor(detected: string | undefined, profileLangu
 
 /** How long a listing of the voice profiles is trusted before it is re-read. */
 const PROFILE_CACHE_MS = 1500;
+
+/**
+ * Whether the weights the runtime resolved here would load are on disk, so a
+ * flow about to start that daemon knows whether it faces a download of
+ * gigabytes or a load of seconds. The snapshot holds no config.json to look
+ * for (hfModelSnapshot wants one); a partial fetch leaves an .incomplete
+ * blob behind, which counts as not cached, since the daemon resumes it.
+ */
+export function chatterboxModelCached(globalStoragePath: string, pref = "auto"): boolean {
+  const runtime = resolveChatterboxRuntime(globalStoragePath, pref);
+  if (!runtime) {
+    return false;
+  }
+  const hub = hubDir();
+  return CHATTERBOX_MODELS[runtime].every((id) => {
+    const dir = path.join(hub, "models--" + id.replace("/", "--"));
+    const entries = (sub: string): string[] => {
+      try {
+        return fs.readdirSync(path.join(dir, sub));
+      } catch {
+        return [];
+      }
+    };
+    const files = entries("snapshots").some((s) => entries(path.join("snapshots", s)).length > 0);
+    const partial = entries("blobs").some((f) => f.endsWith(".incomplete"));
+    return files && !partial;
+  });
+}
 
 /**
  * One utterance to a file, with a short-lived daemon. Used when designing a

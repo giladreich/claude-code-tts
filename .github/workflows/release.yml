@@ -1,7 +1,8 @@
 name: Release
 
-# Tag a commit "1.0.0" (matching package.json) to build the .vsix, attach it
-# to a GitHub release, and publish it.
+# Tag a commit "1.0.0" (matching package.json; "npm run release -- 1.0.0"
+# prepares that commit) to build the .vsix, attach it to a GitHub release,
+# and publish it.
 #
 # Marketplace authentication is Microsoft Entra ID: set the AZURE_CLIENT_ID
 # and AZURE_TENANT_ID repository variables, add a federated credential on that

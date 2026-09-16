@@ -109,7 +109,7 @@ export async function showMenuOnce(): Promise<MenuOutcome> {
     },
     { label: "$(globe) Languages and translation...", run: () => languagesMenu(true) },
     {
-      label: "$(bell) Completion sounds...",
+      label: "$(bell) Notification sounds...",
       detail: config().notifications.enabled ? "on" : "off",
       run: () => soundsMenu(true),
     },
@@ -227,7 +227,7 @@ export async function soundsMenuOnce(back: boolean): Promise<MenuOutcome> {
   return runMenu(
     [
       {
-        label: on ? "$(bell-slash) Turn completion sounds off" : "$(bell) Turn completion sounds on",
+        label: on ? "$(bell-slash) Turn notification sounds off" : "$(bell) Turn notification sounds on",
         detail: "Plays a sound when Claude finishes or needs you, in terminal sessions too",
         command: "claudeCodeTts.toggleNotifications",
       },
@@ -242,7 +242,7 @@ export async function soundsMenuOnce(back: boolean): Promise<MenuOutcome> {
           ]
         : []),
     ],
-    "Completion sounds",
+    "Notification sounds",
     back
   );
 }

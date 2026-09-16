@@ -144,3 +144,88 @@ test("an unreadable extensions directory is never taken as an uninstall", () => 
     assert.match(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"), /claude-code-tts-notify/);
   }
 });
+
+test(
+  "a Windows configured with another platform's sound names still plays: each kind falls back to a sound this Windows ships",
+  { skip: process.platform !== "win32" && "reads the Windows sound library" },
+  () => {
+    // Windows 11 dropped "Windows Proceed", the old fallback for "stop", so
+    // a machine set up from the shipped defaults heard nothing and nothing
+    // said why.
+    const home = tmpDir("cv-notify-");
+    const tmp = tmpDir("cv-notify-tmp-");
+    fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, ".claude", "claude-code-tts-notify.json"),
+      JSON.stringify({
+        enabled: true,
+        volume: 70,
+        sounds: { stop: "Glass", permission: "Funk", tool: "Pop" },
+        toolFilter: ["Bash"],
+      })
+    );
+    process.env.CLAUDE_CODE_TTS_NOTIFY_PRINT = "1";
+    try {
+      for (const kind of ["stop", "permission"]) {
+        const r = spawnSync("node", [path.join(ROOT, "assets", "notify.js"), kind], {
+          input: "{}",
+          env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: tmp, TEMP: tmp, TMP: tmp },
+          timeout: 5000,
+          encoding: "utf8",
+        });
+        const file = String(r.stdout).trim();
+        assert.ok(file.endsWith(".wav") && fs.existsSync(file), `${kind}: a sound this machine has (${file})`);
+      }
+    } finally {
+      delete process.env.CLAUDE_CODE_TTS_NOTIFY_PRINT;
+    }
+  }
+);
+
+test("the extension's own sounds and a file of the user's resolve before any system sound", () => {
+  const home = tmpDir("cv-home-");
+  const tmp = tmpDir("cv-tmp-");
+  fs.mkdirSync(path.join(home, ".claude"));
+  const soundsDir = path.join(tmp, "sounds");
+  fs.mkdirSync(soundsDir);
+  for (const f of ["done", "permission", "tool"]) fs.writeFileSync(path.join(soundsDir, `${f}.wav`), "RIFF");
+  const own = path.join(tmp, "my chime.wav");
+  fs.writeFileSync(own, "RIFF");
+  const write = (sounds) =>
+    fs.writeFileSync(
+      path.join(home, ".claude", "claude-code-tts-notify.json"),
+      JSON.stringify({ enabled: true, volume: 0, sounds, toolFilter: ["Bash"], soundsDir })
+    );
+  const resolved = (kind, payload) => {
+    const r = spawnSync("node", [path.join(ROOT, "assets", "notify.js"), kind], {
+      input: payload ? JSON.stringify(payload) : "",
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        TMPDIR: tmp,
+        TEMP: tmp,
+        TMP: tmp,
+        CLAUDE_CODE_TTS_NOTIFY_PRINT: "1",
+      },
+      timeout: 5000,
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  write({ stop: "builtin/done", permission: own, tool: "No Such Sound Anywhere" });
+  assert.equal(
+    resolved("stop"),
+    path.join(soundsDir, "done.wav"),
+    "the shipped sound, by its stem: the setting says done, the hook says stop"
+  );
+  assert.equal(resolved("notification", { message: "permission needed" }), own, "an absolute path is played as it is");
+  assert.equal(
+    resolved("tool", { tool_name: "Bash" }),
+    path.join(soundsDir, "tool.wav"),
+    "a name this machine lacks falls back to the shipped sound for the kind"
+  );
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

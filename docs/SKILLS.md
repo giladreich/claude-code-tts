@@ -24,8 +24,9 @@
 3. Daemon logs for tracebacks; `ready` timeouts mean a model load/download stalled (HF network).
 
 ## Release
-Changelog section, version in `package.json` and the lockfile, `git tag 1.1.0`,
-push. Setup and everything that can go wrong: [PUBLISHING.md](PUBLISHING.md).
+Notes go under `## [Unreleased]` in `CHANGELOG.md`; `npm run release -- <version>`
+stamps them and the version in `package.json` and the lockfile; commit that on its own on `dev`,
+fast-forward `main`, `git tag <version>`, push. Setup and everything that can go wrong: [PUBLISHING.md](PUBLISHING.md).
 
 ## Change the icon
 `assets/icon.svg` is the source; `assets/icon.png` beside it is what ships, and

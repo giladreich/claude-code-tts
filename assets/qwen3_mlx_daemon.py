@@ -15,6 +15,7 @@
 #   Edge silence is trimmed (the first part's lead-in, and both ends of
 #   whole-file output; a stream is closed by a silence part instead).
 # mlx-audio caches the clone prompt per reference. Runs 100% locally.
+import collections
 import array
 import json
 import os
@@ -26,6 +27,7 @@ import wave
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from reference import condensed_reference
 from speech_budget import expected_seconds
 from mlx_audio.tts.utils import load_model
 
@@ -51,7 +53,7 @@ TOP_P = float(cfg.get("top_p", 0.95))
 try:
     _warm = {"text": "Ready.", "lang_code": "english"}
     if clone:
-        _warm.update(ref_audio=clone["ref_audio"], ref_text=clone["ref_text"])
+        _warm.update(ref_audio=condensed_reference(clone["ref_audio"])[0], ref_text=clone["ref_text"])
     else:
         _warm["voice"] = "Ryan"
     for _ in model.generate(**_warm):
@@ -171,13 +173,24 @@ if _decoder is not None:
     if clone:
         try:
             _decoder_reset()
-            _prime_decoder((clone["ref_audio"], clone["ref_text"]))
+            _prime_decoder((condensed_reference(clone["ref_audio"])[0], clone["ref_text"]))
             _decoder_reset()
         except Exception as e:
             print(json.dumps({"prime_error": str(e)}), file=sys.stderr, flush=True)
 
 urgent, background = [], []
-cancelled = set()
+cancelled = collections.OrderedDict()  # cancelled request ids, oldest first
+
+
+def mark_cancelled(cid):
+    """Called with cv held. Oldest out rather than all out: clearing the whole
+    set when it grew past a thousand un-cancelled requests still queued, which
+    then generated audio nobody would play."""
+    cancelled[cid] = True
+    while len(cancelled) > 2000:
+        cancelled.popitem(last=False)
+
+
 cv = threading.Condition()
 eof = False
 
@@ -194,10 +207,8 @@ def reader():
             continue
         with cv:
             if "cancel" in req:
-                cancelled.add(req["cancel"])
-                if len(cancelled) > 1000:
-                    cancelled.clear()
-            else:
+                mark_cancelled(req["cancel"])
+            elif "id" in req:  # anything else is a message this daemon does not speak
                 (urgent if req.get("priority") else background).append(req)
             cv.notify()
     with cv:
@@ -303,7 +314,7 @@ def gen_kwargs(req, stream):
     ref_audio = req.get("ref_audio") or (clone or {}).get("ref_audio")
     ref_text = req.get("ref_text") or (clone or {}).get("ref_text")
     if ref_audio and ref_text:
-        kw["ref_audio"] = ref_audio
+        kw["ref_audio"] = _condensed(ref_audio)
         kw["ref_text"] = ref_text
     else:
         kw["voice"] = req.get("voice", "Ryan")
@@ -327,6 +338,18 @@ def gen_kwargs(req, stream):
 # takes the arguments this was written against; otherwise generate() as before.
 _ref_audio_cache = {}
 _icl_reported = {"done": False}
+_condensed_paths = {}
+
+
+def _condensed(ref_audio):
+    """The reference as the model should hear it: long pauses inside it shortened (see reference.py)."""
+    path = _condensed_paths.get(ref_audio)
+    if path is None:
+        path, note = condensed_reference(ref_audio)
+        if note:
+            print(note, file=sys.stderr, flush=True)
+        _condensed_paths[ref_audio] = path
+    return path
 
 
 def _loaded_reference(path):
@@ -423,7 +446,7 @@ while True:
             write_wav(tail, np.zeros(int(sr * END_BREATH * pause_scale), dtype=np.float32), sr)
             print(json.dumps({"id": rid, "part": tail, "final": True}), flush=True)
             gen = time.time() - t_gen
-            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "gen_s": round(gen, 2), "audio_s": round(produced, 2),
+            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "language": str(req.get("language", "auto")).lower(), "gen_s": round(gen, 2), "audio_s": round(produced, 2),
                               "rtf": round(gen / max(produced, 0.01), 2), "text": req["text"][:40]}), file=sys.stderr, flush=True)
             print(json.dumps({"id": rid, "ok": True, "gen_s": round(gen, 2), "audio_s": round(produced, 2)}), flush=True)
         else:
@@ -437,11 +460,11 @@ while True:
             write_wav(req["out"], trim_trailing(trim_leading(audio, sr), sr), sr, gain)
             gen = time.time() - t_gen
             audio_s = audio.size / sr
-            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "gen_s": round(gen, 2), "audio_s": round(audio_s, 2),
+            print(json.dumps({"request": rid, "priority": req.get("priority", 0), "language": str(req.get("language", "auto")).lower(), "gen_s": round(gen, 2), "audio_s": round(audio_s, 2),
                               "rtf": round(gen / max(audio_s, 0.01), 2), "text": req["text"][:40]}), file=sys.stderr, flush=True)
             print(json.dumps({"id": rid, "ok": True, "gen_s": round(gen, 2), "audio_s": round(audio_s, 2)}), flush=True)
     except Exception as e:  # keep serving after a bad request
         print(json.dumps({"id": rid, "ok": False, "error": str(e)}), flush=True)
     finally:
         with cv:
-            cancelled.discard(rid)
+            cancelled.pop(rid, None)

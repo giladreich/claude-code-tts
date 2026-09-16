@@ -2,7 +2,7 @@
  * What the extension leaves under ~/.claude, and its removal.
  *
  * VSCode deletes an uninstalled extension's own storage on its next start,
- * but nothing it never owned: the completion-sound hook entries written into
+ * but nothing it never owned: the notification-sound hook entries written into
  * ~/.claude/settings.json kept pointing at a notify script that no longer
  * existed, so every Claude Code event reported a failing hook, and the sound
  * choices and the window registry stayed behind too. package.json names this
@@ -15,6 +15,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { writeFileAtomicSync } from "../platform/atomicFile";
 import { applyHookRemove, settingsHaveScript } from "./hooks";
 
 /** The hook entries are recognised by the script they run, wherever it lives. */
@@ -35,8 +36,8 @@ export function cleanClaudeDirectory(home = os.homedir(), keepWindowRegistry = f
     // An editor on Windows may have left a byte order mark in front of it.
     const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8").replace(/^\uFEFF/, ""));
     if (settingsHaveScript(settings, NOTIFY_SCRIPT_NAME)) {
-      fs.writeFileSync(settingsFile, JSON.stringify(applyHookRemove(settings, NOTIFY_SCRIPT_NAME), null, 2) + "\n");
-      removed.push("the completion-sound hooks in ~/.claude/settings.json");
+      writeFileAtomicSync(settingsFile, JSON.stringify(applyHookRemove(settings, NOTIFY_SCRIPT_NAME), null, 2) + "\n");
+      removed.push("the notification-sound hooks in ~/.claude/settings.json");
     }
   } catch {
     // No settings file, or one this code cannot parse: not ours to rewrite.

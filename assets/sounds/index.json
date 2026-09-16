@@ -1,0 +1,422 @@
+[
+  {
+    "value": "builtin/done",
+    "label": "Done: Modern smartphone notification sound",
+    "detail": "0.78 s, the default",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-1",
+    "label": "Done 1: Short pleasant two-note notification chime",
+    "detail": "1.1 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-2",
+    "label": "Done 2: Short pleasant two-note notification chime",
+    "detail": "1.19 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-3",
+    "label": "Done 3: Gentle rising three-note success chime",
+    "detail": "1.13 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-4",
+    "label": "Done 4: Gentle rising three-note success chime",
+    "detail": "1.31 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-5",
+    "label": "Done 5: Soft marimba success notification",
+    "detail": "1.11 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-6",
+    "label": "Done 6: Soft marimba success notification",
+    "detail": "1.19 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-7",
+    "label": "Done 7: Elegant task complete chime",
+    "detail": "1.8 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-8",
+    "label": "Done 8: Elegant task complete chime",
+    "detail": "1.51 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-9",
+    "label": "Done 9: Modern smartphone notification sound",
+    "detail": "1.05 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/done-10",
+    "label": "Done 10: Modern smartphone notification sound",
+    "detail": "1.04 s",
+    "group": "Done",
+    "event": "done"
+  },
+  {
+    "value": "builtin/question",
+    "label": "Question: Two-note rising question chime",
+    "detail": "0.99 s, the default",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/question-1",
+    "label": "Question 1: Two-note rising question chime",
+    "detail": "0.64 s",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/question-2",
+    "label": "Question 2: Gentle inquisitive notification sound",
+    "detail": "1.31 s",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/question-3",
+    "label": "Question 3: Gentle inquisitive notification sound",
+    "detail": "0.76 s",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/question-4",
+    "label": "Question 4: Soft bell asking a question",
+    "detail": "0.99 s",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/question-5",
+    "label": "Question 5: Soft bell asking a question",
+    "detail": "0.94 s",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/question-6",
+    "label": "Question 6: Soft bell asking a question",
+    "detail": "1.0 s",
+    "group": "Question",
+    "event": "question"
+  },
+  {
+    "value": "builtin/permission",
+    "label": "Permission: Attention notification chime",
+    "detail": "1.33 s, the default",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/permission-1",
+    "label": "Permission 1: Attention notification chime",
+    "detail": "1.34 s",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/permission-2",
+    "label": "Permission 2: Polite alert sound",
+    "detail": "1.53 s",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/permission-3",
+    "label": "Permission 3: Polite alert sound",
+    "detail": "0.92 s",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/permission-4",
+    "label": "Permission 4: Polite alert sound",
+    "detail": "1.26 s",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/permission-5",
+    "label": "Permission 5: Gentle request for attention chime",
+    "detail": "0.84 s",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/permission-6",
+    "label": "Permission 6: Gentle request for attention chime",
+    "detail": "1.56 s",
+    "group": "Permission",
+    "event": "permission"
+  },
+  {
+    "value": "builtin/waiting",
+    "label": "Waiting: Gentle reminder notification",
+    "detail": "1.34 s, the default",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/waiting-1",
+    "label": "Waiting 1: Single soft bell",
+    "detail": "1.81 s",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/waiting-2",
+    "label": "Waiting 2: Single soft bell",
+    "detail": "2.04 s",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/waiting-3",
+    "label": "Waiting 3: Gentle reminder notification",
+    "detail": "1.15 s",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/waiting-4",
+    "label": "Waiting 4: Gentle reminder notification",
+    "detail": "1.35 s",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/waiting-5",
+    "label": "Waiting 5: Soft glass chime",
+    "detail": "1.21 s",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/waiting-6",
+    "label": "Waiting 6: Soft glass chime",
+    "detail": "1.27 s",
+    "group": "Waiting",
+    "event": "waiting"
+  },
+  {
+    "value": "builtin/tool",
+    "label": "Tool: Single soft typewriter click",
+    "detail": "0.25 s, the default",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-1",
+    "label": "Tool 1: Single soft typewriter click",
+    "detail": "0.34 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-2",
+    "label": "Tool 2: Single soft typewriter click",
+    "detail": "0.27 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-3",
+    "label": "Tool 3: Single soft typewriter click",
+    "detail": "0.21 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-4",
+    "label": "Tool 4: Single crisp mechanical click",
+    "detail": "0.11 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-5",
+    "label": "Tool 5: Single crisp mechanical click",
+    "detail": "0.11 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-6",
+    "label": "Tool 6: Short wooden tick",
+    "detail": "0.16 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-7",
+    "label": "Tool 7: Short wooden tick",
+    "detail": "0.12 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/tool-8",
+    "label": "Tool 8: Soft short mechanical click",
+    "detail": "0.18 s",
+    "group": "Tool",
+    "event": "tool"
+  },
+  {
+    "value": "builtin/prompt",
+    "label": "Prompt: Gentle single plucked harp note",
+    "detail": "1.02 s, the default",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-1",
+    "label": "Prompt 1: Gentle single plucked harp note",
+    "detail": "0.89 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-2",
+    "label": "Prompt 2: Gentle single plucked harp note",
+    "detail": "1.04 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-3",
+    "label": "Prompt 3: Gentle single plucked harp note",
+    "detail": "1.05 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-4",
+    "label": "Prompt 4: Single gentle marimba note",
+    "detail": "0.21 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-5",
+    "label": "Prompt 5: Single gentle marimba note",
+    "detail": "0.3 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-6",
+    "label": "Prompt 6: Short bright single ding",
+    "detail": "0.54 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-7",
+    "label": "Prompt 7: Soft synth pop notification",
+    "detail": "0.32 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/prompt-8",
+    "label": "Prompt 8: Short soft xylophone tap",
+    "detail": "0.21 s",
+    "group": "Prompt",
+    "event": "prompt"
+  },
+  {
+    "value": "builtin/subagent",
+    "label": "Subagent: Quiet wooden marimba",
+    "detail": "0.27 s, the default",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-1",
+    "label": "Subagent 1: Quiet wooden marimba",
+    "detail": "1.7 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-2",
+    "label": "Subagent 2: Quiet wooden marimba",
+    "detail": "0.55 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-3",
+    "label": "Subagent 3: Quiet wooden marimba",
+    "detail": "0.3 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-4",
+    "label": "Subagent 4: Soft two-note descending chime",
+    "detail": "0.63 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-5",
+    "label": "Subagent 5: Gentle xylophone notification",
+    "detail": "0.52 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-6",
+    "label": "Subagent 6: Small glassy chime rising",
+    "detail": "1.7 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-7",
+    "label": "Subagent 7: Gentle harp pluck",
+    "detail": "1.05 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-8",
+    "label": "Subagent 8: Soft muted bell",
+    "detail": "1.7 s",
+    "group": "Subagent",
+    "event": "subagent"
+  },
+  {
+    "value": "builtin/subagent-9",
+    "label": "Subagent 9: Soft short digital chirp",
+    "detail": "1.5 s",
+    "group": "Subagent",
+    "event": "subagent"
+  }
+]

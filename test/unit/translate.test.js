@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const { Translator } = require("../../out/language/translate.js");
-const { tmpDir } = require("../helpers");
+const { tmpDir, plainPython } = require("../helpers");
 
 /** A daemon that speaks the real protocol but "translates" by tagging text. */
 function stubDaemon(dir, { failOn = null, failMessage = "no model installed", ready = true } = {}) {
@@ -35,7 +35,7 @@ for line in sys.stdin:
   return script;
 }
 
-const python = process.platform === "win32" ? "python" : "python3";
+const python = plainPython() ?? "python3";
 
 test("translates, caches, and leaves same-language text alone", async () => {
   const dir = tmpDir("cv-tr-");
@@ -100,7 +100,7 @@ for line in sys.stdin:
     print(json.dumps({"id": req["id"], "ok": True, "text": "[%d] %s" % (n, req["text"])}), flush=True)
 `
   );
-  const t = new Translator({ daemonScript: script, python: "python3" });
+  const t = new Translator({ daemonScript: script, python });
   try {
     const first = await t.translate("sentence zero", "en", "de");
     // Fill the cache past its limit, touching entry zero once on the way so it
@@ -145,7 +145,11 @@ for line in sys.stdin:
     n += 1
     open(${JSON.stringify(counter)}, "w").write(str(n))
     op = req.get("op", "translate")
-    if op == "install":
+    if op == "locate":
+        print(json.dumps({"id": req["id"], "ok": True, "url": "https://example.invalid/en_he.argosmodel", "name": "en_he.argosmodel"}), flush=True)
+    elif op == "install":
+        # The file the extension fetched is there, whole, when the daemon is asked to install it.
+        open(${JSON.stringify(counter)} + ".installed", "w").write(open(req["path"], "rb").read().decode("utf-8"))
         installed.add(req["from"] + ">" + req["to"])
         print(json.dumps({"id": req["id"], "ok": True, "pairs": sorted(installed)}), flush=True)
     elif req["from"] + ">" + req["to"] not in installed:
@@ -157,12 +161,21 @@ for line in sys.stdin:
   const requests = () => Number(fs.readFileSync(counter, "utf8"));
   const errors = [];
   const missing = [];
+  const fetched = [];
   const t = new Translator({
     daemonScript: script,
     python,
     onError: (m) => errors.push(m),
     onMissingModel: (f, to) => missing.push(`${f}>${to}`),
+    // The model comes from the address the daemon names, fetched by the extension: served here from memory.
+    fetch: async (url, dest, onBytes) => {
+      fetched.push(url);
+      fs.writeFileSync(dest, "model bytes");
+      onBytes(5, 11);
+      onBytes(6, 11);
+    },
   });
+  const progress = [];
   try {
     assert.equal(await t.translate("first paragraph", "en", "he"), "first paragraph", "the original is spoken");
     assert.deepEqual(missing, ["en>he"]);
@@ -176,8 +189,16 @@ for line in sys.stdin:
     assert.equal(errors.length, 1);
     // Another direction is unaffected.
     assert.equal(await t.translate("unaffected", "en", "de"), "[de] unaffected");
-    // After the install the direction is asked about again and works.
-    await t.install("en", "he");
+    // After the install the direction is asked about again and works. The
+    // daemon says where the model is, the extension fetches it (with its
+    // bytes and total reported), and the daemon installs the file.
+    await t.install("en", "he", (n, total) => progress.push([n, total]));
+    assert.deepEqual(fetched, ["https://example.invalid/en_he.argosmodel"]);
+    assert.deepEqual(progress, [
+      [5, 11],
+      [6, 11],
+    ]);
+    assert.equal(fs.readFileSync(`${counter}.installed`, "utf8"), "model bytes");
     assert.equal(await t.translate("fourth paragraph", "en", "he"), "[he] fourth paragraph");
   } finally {
     t.dispose();
@@ -410,4 +431,22 @@ test("choosing the language Claude already writes in downloads nothing", () => {
   assert.equal(translationModelMissing([], "en", "en"), false);
   assert.equal(translationModelMissing(["en>de"], "en", "he"), true);
   assert.equal(translationModelMissing(["en>de", "en>he"], "en", "he"), false);
+});
+
+test("a sentence whose identifiers the model drops is translated with them in the open, not left as written", async () => {
+  // Two file names in one sentence were more than this model carried
+  // through, and the whole paragraph used to be spoken in the wrong
+  // language for it. Now that sentence is asked for on its own and, when
+  // the placeholders still vanish, with the names left in the text.
+  const dir = tmpDir("cv-tr-");
+  const t = new Translator({ daemonScript: fragileDaemon(dir, { mode: "drop" }), python, keepTerms: () => [] });
+  try {
+    const text = "Rename foo.ts to bar.ts first. Then run the tests.";
+    const out = await t.translate(text, "en", "ar");
+    assert.ok(out.includes("foo.ts") && out.includes("bar.ts"), `the names are in the sentence: ${out}`);
+    assert.ok(!out.includes("Rename foo.ts to bar.ts first"), `the sentence is translated, not copied: ${out}`);
+    assert.ok(out.startsWith("[ar]"), out);
+  } finally {
+    t.dispose();
+  }
 });

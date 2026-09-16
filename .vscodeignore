@@ -36,3 +36,5 @@ docs/SKILLS.md
 eslint.config.mjs
 .prettierrc.json
 .prettierignore
+# Sounds gathered for auditioning, never shipped.
+sound-candidates/**

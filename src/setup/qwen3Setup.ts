@@ -29,17 +29,43 @@ export interface Qwen3SetupDeps {
   log: (line: string) => void;
   showLog: () => void;
   /** Install a Python tool through uv (the user's, or the extension's private copy); true on success. */
-  installTool: (pkg: string) => Promise<boolean>;
+  installTool: (pkg: string, extra?: string[]) => Promise<boolean>;
   /** Switch the extension to Qwen3 and warm the model. */
   activate: () => Promise<void>;
   /** The checkpoint this machine will download, described in words. */
   modelDownload?: string;
+  /**
+   * The runtime is installed but built without the GPU this machine has:
+   * the name of that GPU, and the arguments that install the build for it.
+   */
+  gpuUpgrade?: () => Promise<{ gpu: string; extra: string[] } | undefined>;
+  /** Stop the running engine before its runtime is replaced under it (Windows cannot overwrite open files). */
+  releaseEngine?: () => Promise<void>;
 }
 
 /** Returns true when Qwen3 is usable afterwards. */
 export async function setupQwen3(deps: Qwen3SetupDeps): Promise<boolean> {
   if (qwen3Available()) {
     const runtime = resolveQwen3Runtime("auto");
+    const upgrade = runtime === "torch" ? await deps.gpuUpgrade?.() : undefined;
+    if (upgrade) {
+      const go = await vscode.window.showInformationMessage(
+        `Claude Code TTS: Qwen3 is installed, but its PyTorch build runs on the CPU, several times slower than speech; this machine has ${upgrade.gpu}. Install it again for the GPU? That downloads the GPU build of PyTorch (about 3 GB) into the same isolated environment.`,
+        { modal: true },
+        "Install for the GPU"
+      );
+      if (go !== "Install for the GPU") {
+        return false;
+      }
+      await deps.releaseEngine?.();
+      const ok = await deps.installTool(qwen3Package().pkg, ["--reinstall", ...upgrade.extra]);
+      resetQwen3Lookups();
+      if (!ok || !qwen3Available()) {
+        return false;
+      }
+      await deps.activate();
+      return true;
+    }
     const go = await vscode.window.showInformationMessage(
       `Claude Code TTS: Qwen3 is already installed (${runtime === "mlx" ? "MLX" : "PyTorch"} runtime). Switch to it now? The voice model (${deps.modelDownload ?? "~2.3 GB"}) downloads on first use and then runs offline.`,
       { modal: true },

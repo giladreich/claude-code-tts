@@ -21,6 +21,7 @@ import {
   currentRecommendation,
   downloadVoiceFlow,
   ensurePiper,
+  neuralEnginesBlocked,
   offerChatterboxVoice,
   setupChatterboxFlow,
   setupKokoroFlow,
@@ -43,6 +44,19 @@ import {
 import { listSystemVoices } from "../tts/system";
 import { BACK, MenuOutcome, inputWithBack, livePreviewPicker, pickWithBack } from "./prompts";
 import { dropMappingCoveredBy, profileFor } from "../voices/voiceProfiles";
+import { SAMPLES } from "../language/languageSupport";
+
+/**
+ * What a voice of your own says when auditioned: a sentence in the language
+ * it was made for, stated as that language. Every voice used to read the
+ * same English sentence, and a voice designed for another language read it
+ * as if it were that language, which was heard as an accent the voice does
+ * not have.
+ */
+function ownVoiceSample(value: string): { text: string; voice: string; language?: string } {
+  const language = profileFor(value)?.language;
+  return { text: (language && SAMPLES[language]) || "This is your cloned voice.", voice: value, language };
+}
 
 /** The rows every voice list ends with, and the flows they open. */
 const DESIGN_VOICE = "$(wand) Design a new voice (describe it in words)...";
@@ -88,12 +102,16 @@ export async function selectEngine(back = false): Promise<MenuOutcome> {
         "Light neural voices for weak hardware, ~60 MB each. Needs the piper program and one downloaded voice file at a time.",
     },
   ];
+  // A Windows that will not run the neural engines says so on each of them,
+  // rather than after a download; the setup flows stop as well.
+  const blocked = neuralEnginesBlocked() ? "Runs only while Windows Smart App Control is off. " : "";
   const ordered = [...engines].sort((a, b) => Number(b.id === recommended) - Number(a.id === recommended));
   const picked = await pickWithBack(
     ordered.map((e) => ({
       ...e,
-      label: e.id === recommended ? `${e.label} (recommended)` : e.label,
+      label: e.id === recommended && !blocked ? `${e.label} (recommended)` : e.label,
       description: mark(e.id),
+      detail: e.id === "system" ? e.detail : `${blocked}${e.detail}`,
     })),
     { placeHolder: "Text-to-speech engine", title: `Engine (now: ${engineName()})`, matchOnDetail: true },
     back
@@ -282,7 +300,7 @@ export async function selectChatterboxVoice(back = false): Promise<MenuOutcome> 
     title: voicePickerTitle(),
     back,
     debounceMs: 400,
-    sample: (item) => (item.value ? { text: "This is your cloned voice speaking.", voice: item.value } : undefined),
+    sample: (item) => (item.value ? ownVoiceSample(item.value) : undefined),
     accept: async (item) => {
       const byLabel: Record<string, string> = {
         [RECORD_CLONE]: "claudeCodeTts.cloneVoice",
@@ -400,10 +418,9 @@ export async function selectQwen3Voice(back = false): Promise<MenuOutcome> {
         const file = clone ? undefined : presetSampleFile(item.value);
         return file ? { text: "", voice: item.value, file } : undefined;
       }
-      return {
-        text: `This is ${clone ? "your cloned" : `the ${spoken(item.value)}`} voice.`,
-        voice: item.value,
-      };
+      return clone
+        ? ownVoiceSample(item.value)
+        : { text: `This is the ${spoken(item.value)} voice.`, voice: item.value };
     },
     accept: async (item) => {
       const byLabel: Record<string, string> = {

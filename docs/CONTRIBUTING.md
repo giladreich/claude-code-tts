@@ -27,13 +27,16 @@ code --install-extension claude-code-tts-<version>.vsix
 
 `npm run verify` is the same gate a pull request goes through, so a branch that
 passes it locally passes the checks. Packaging runs it too: an unformatted or
-unlinted tree cannot be built into a `.vsix`.
+unlinted tree cannot be built into a `.vsix`. Branch from `dev` and open the
+pull request against `dev`; `main` moves only when a release is cut from `dev`.
 
 Reload every VSCode window after installing: each window keeps the version it started with.
 
 ## What the checks are
 
-Every pull request, and every push to `main`, runs [`.github/workflows/ci.yml`](../.github/workflows/ci.yml):
+Every pull request runs [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+(nothing runs on a push; for a branch without a pull request, *Actions* -> *CI* ->
+**Run workflow**):
 format and lint first (seconds, nothing installed), then compile and unit tests on
 Linux and Windows, the player, extraction and pipeline tests on macOS (that job is
 `continue-on-error`, because hosted macOS runners may have no audio device, and the
@@ -93,9 +96,9 @@ the picture: it is what a screen reader and a failed image both fall back to.
 
 ## Releasing
 
-1. Update `CHANGELOG.md` (top entry, user-facing) and the version in `package.json`.
+1. Notes for the person using the extension go under `## [Unreleased]` in `CHANGELOG.md`; `npm run release -- <version>` turns that into the version's section and sets the version in `package.json` and the lockfile.
 2. `npm run verify`, then install the packaged `.vsix` and try the change in a real session.
-3. Push a tag `<version>`, with no prefix (`1.1.0`), and the release workflow does the rest. [PUBLISHING.md](PUBLISHING.md) is the one place the whole procedure is written down, setup included.
+3. Commit that on its own on `dev` (the release commit carries the notes and the version, nothing else), fast-forward `main` to it, and push a tag `<version>`, with no prefix (`1.1.1`); the release workflow runs the whole suite and does the rest. [PUBLISHING.md](PUBLISHING.md) is the one place the whole procedure is written down, setup included.
 
 ## Voice cloning changes
 

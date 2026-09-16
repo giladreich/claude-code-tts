@@ -24,6 +24,7 @@ const baseConfig = {
   qwen3Style: "",
   qwen3Runtime: "auto",
   qwen3DaemonScript: "/x",
+  systemHostScript: "/x",
   qwen3VoicesDir: "/x",
 };
 
@@ -688,5 +689,51 @@ test("an utterance carries the message it belongs to through coalescing, and an 
   assert.equal(eng.events[2].preview, true, "an audition is marked, so it is never kept for export");
   assert.equal(eng.events[2].group, undefined);
   q.stop();
+  q.dispose();
+});
+
+test("an audition is spoken as the language of its sentence, stated or detected", async () => {
+  // A German voice auditioned with an English sentence and no language was
+  // read by Qwen3 as if the English were German.
+  const eng = fakeEngine(20);
+  const q = new SpeechQueue(
+    { ...baseConfig, autoLanguage: true },
+    () => {},
+    undefined,
+    () => eng
+  );
+  // Long enough for the detector; one short sentence is not, which is why
+  // the pickers state the language of a voice's sample rather than trust it.
+  q.preview("Hallo. Das ist die Stimme, die du entworfen hast. Claude wird ab jetzt so klingen.", "clone:de");
+  await until(() => eng.events.length === 1, 2000);
+  assert.equal(eng.events[0].language, "de", "detected from the sentence");
+  await sleep(40);
+  q.preview("This voice will read English messages.", "clone:de", undefined, undefined, undefined, undefined, "fr");
+  await until(() => eng.events.length === 2, 2000);
+  assert.equal(eng.events[1].language, "fr", "a stated language wins");
+  q.stop();
+  q.dispose();
+});
+
+test("announcements merge only up to the engine's first chunk when the config says so", async () => {
+  // A slow streaming engine is given sentence-sized chunks so its waits fall
+  // between sentences; merging two of them back into one undid that.
+  const engine = fakeEngine(30);
+  const q = new SpeechQueue(
+    { ...baseConfig, coalesceMax: 45 },
+    () => {},
+    undefined,
+    () => engine
+  );
+  q.pause(); // nothing plays: everything queues, so the merging is visible
+  q.enqueue("A first short chunk here.");
+  q.enqueue("A second short chunk which would have merged before.");
+  q.enqueue("Ok.");
+  q.enqueue("Go.");
+  assert.equal(
+    q.pending,
+    3,
+    "the second chunk stays its own utterance; the two tiny ones merge with each other into a third"
+  );
   q.dispose();
 });

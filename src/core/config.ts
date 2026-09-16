@@ -14,8 +14,8 @@ import * as vscode from "vscode";
 import { kokoroDaemonScriptOf, kokoroDirOf } from "../setup/kokoroSetup";
 import { runtime } from "./runtime";
 import { SpeechConfig } from "../speech/speech";
-import { NotifyConfig } from "../setup/notifySetup";
-import { qwen3VoicesDir } from "../tts/qwen3";
+import { bundledSoundsDir, NotifyConfig } from "../setup/notifySetup";
+import { qwen3RuntimeOnDisk, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
 import { SpeedMemory } from "../tts/types";
 import { rateFor, withVoiceRate } from "../speech/voiceRates";
 
@@ -128,6 +128,7 @@ export function readConfig() {
       volume: c.get<number>("notifications.volume", 70),
       sounds: soundsOf(c.get<Record<string, string>>("notifications.sounds", DEFAULT_SOUNDS)),
       toolFilter: c.get<string[]>("notifications.toolFilter", ["Bash"]),
+      soundsDir: runtime.context ? bundledSoundsDir(runtime.context) : undefined,
     },
     speechConfig: {
       engine: c.get<SpeechConfig["engine"]>("engine", "system"),
@@ -150,6 +151,20 @@ export function readConfig() {
       speakLanguage: c.get<string>("speakLanguage", ""),
       languageVoices: c.get<Record<string, string>>("languageVoices", {}),
       qwen3DaemonScript: path.join(runtime.context.extensionPath, "assets", "qwen3_daemon.py"),
+      systemHostScript: path.join(runtime.context.extensionPath, "assets", "sapi_host.ps1"),
+      // The runtime is resolved here rather than by chunkPlanFor, which reads
+      // config() for it: that is what is being built, and a read from inside
+      // it starts another build. From the disk only: this runs at activation,
+      // and the probe that is sure starts a Python that imports torch.
+      coalesceMax: firstChunk(
+        chunkPlan(
+          c.get<SpeechConfig["engine"]>("engine", "system"),
+          c.get<string>("qwen3.model", "0.6B"),
+          c.get<string>("engine", "system") === "qwen3"
+            ? qwen3RuntimeOnDisk(c.get<string>("qwen3.runtime", "auto"))
+            : undefined
+        )
+      ),
       qwen3VoicesDir: qwen3VoicesDir(runtime.context.globalStorageUri.fsPath),
       chatterboxVoice: c.get<string>("chatterbox.voice", "default"),
       chatterboxRuntime: c.get<string>("chatterbox.runtime", "auto"),
@@ -239,12 +254,19 @@ export async function saveVoiceRate(rate: number): Promise<void> {
   );
 }
 
-/** Events that sound out of the box; anything absent is silent. */
+/**
+ * Events that sound out of the box; anything absent is silent. The shipped
+ * sounds (assets/sounds), the same on every platform: the system libraries
+ * differ per platform and a name synced from another machine named nothing
+ * here, and the Windows ones are quiet.
+ */
 export const DEFAULT_SOUNDS: Record<string, string> = {
-  done: "Glass",
-  permission: "Funk",
-  question: "Ping",
-  waiting: "Purr",
+  done: "builtin/done",
+  permission: "builtin/permission",
+  question: "builtin/question",
+  waiting: "builtin/waiting",
+  tool: "builtin/tool",
+  subagent: "builtin/subagent",
 };
 
 /**
@@ -271,15 +293,46 @@ export function soundsOf(s: Record<string, string>): NotifyConfig["sounds"] {
  * behind them, are in the body.
  */
 export function chunkPlanFor(engine: SpeechConfig["engine"], qwen3Model = "0.6B"): number | number[] {
+  return chunkPlan(
+    engine,
+    qwen3Model,
+    engine === "qwen3" ? resolveQwen3Runtime(config().speechConfig.qwen3Runtime) : undefined
+  );
+}
+
+/**
+ * The plan with the Qwen3 runtime given rather than read from the settings.
+ * No default may reach for config() here: readConfig() computes the merge
+ * limit from this plan, and a runtime that resolves to undefined (not
+ * installed, or MLX asked for off Apple Silicon) then re-entered config(),
+ * which built another config, without end.
+ */
+export function chunkPlan(
+  engine: SpeechConfig["engine"],
+  qwen3Model: string,
+  qwen3Runtime: "mlx" | "torch" | undefined
+): number | number[] {
   if (engine === "system") {
     return 260;
   }
-  // Qwen3 renders a whole chunk as one sequence, so prosody carries across
-  // its sentences: after a small first chunk (fast start), chunks are large
-  // for the most natural reading; streaming keeps the latency unchanged.
-  // The 1.7B model runs at about realtime, so each chunk must be partly
-  // buffered before it plays: smaller chunks keep that wait short.
+  // Qwen3 on MLX renders a whole chunk as one sequence, so prosody carries
+  // across its sentences: after a small first chunk (fast start), chunks are
+  // large for the most natural reading; streaming keeps the latency
+  // unchanged. The 1.7B model runs at about realtime, so each chunk must be
+  // partly buffered before it plays: smaller chunks keep that wait short.
+  //
+  // The PyTorch runtime streams, and its daemon generates the chunks queued
+  // together in one pass, so a message's first chunk is the one whose wait
+  // is heard: with the player on Windows unable to stretch time, it waits
+  // for part of itself before it plays (nothing, once the engine measures
+  // faster than speech, which a laptop with an NVIDIA GPU does at 0.75x; the
+  // shortfall on a slower GPU), and that wait sets the chunk size.
+  // Sentence-sized chunks keep it short, where a 130-character chunk opened
+  // with five seconds of silence and stuttered inside.
   if (engine === "qwen3") {
+    if (qwen3Runtime === "torch") {
+      return [45, 70, 90];
+    }
     return qwen3Model === "1.7B" ? [110, 260, 420] : [110, 380, 750];
   }
   // Chatterbox has no streaming: a chunk stays silent until the whole thing
@@ -316,4 +369,9 @@ export function chunkPlanFor(engine: SpeechConfig["engine"], qwen3Model = "0.6B"
     return [45, 130, 180];
   }
   return [150, 350, 600];
+}
+
+/** The size of the first chunk of a plan: what short announcements may merge up to without defeating the plan. */
+export function firstChunk(plan: number | number[]): number {
+  return Array.isArray(plan) ? plan[0] : plan;
 }

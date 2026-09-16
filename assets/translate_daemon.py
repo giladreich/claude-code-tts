@@ -4,7 +4,11 @@
 # service. Stdio JSON protocol, one object per line:
 #   {"id": 1, "text": "...", "from": "en", "to": "de"}  -> {"id": 1, "ok": true, "text": "..."}
 #   {"id": 2, "op": "packages"}                          -> {"id": 2, "ok": true, "pairs": ["en>de", ...]}
-#   {"id": 3, "op": "install", "from": "en", "to": "de"} -> {"id": 3, "ok": true}   (downloads a model)
+#   {"id": 3, "op": "locate", "from": "en", "to": "de"} -> {"id": 3, "ok": true, "url": "...", "name": "..."}
+#   {"id": 4, "op": "install", "from": "en", "to": "de", "path": "/tmp/x.argosmodel"} -> {"id": 4, "ok": true}
+# The extension fetches the model file itself (through the editor's proxy, with
+# progress shown) and hands the daemon the path; without a path the daemon
+# downloads it, as argos would.
 # Translations are cached per pair; the model stays loaded between requests.
 import json
 import sys
@@ -51,13 +55,25 @@ def translation_for(src, dst):
     return t
 
 
-def install(src, dst):
+def published(src, dst):
     argostranslate.package.update_package_index()
     available = argostranslate.package.get_available_packages()
     match = next((p for p in available if p.from_code == src and p.to_code == dst), None)
     if match is None:
         raise RuntimeError(f"no published model for {src} to {dst}")
-    argostranslate.package.install_from_path(match.download())
+    return match
+
+
+def locate(src, dst):
+    match = published(src, dst)
+    links = list(getattr(match, "links", None) or [])
+    if not links:
+        raise RuntimeError(f"the index names no download for {src} to {dst}")
+    return {"url": links[0], "name": f"translate-{src}_{dst}.argosmodel"}
+
+
+def install(src, dst, path=None):
+    argostranslate.package.install_from_path(path or published(src, dst).download())
     _translations.clear()
 
 
@@ -73,8 +89,10 @@ for line in sys.stdin:
         op = req.get("op", "translate")
         if op == "packages":
             print(json.dumps({"id": rid, "ok": True, "pairs": pairs()}), flush=True)
+        elif op == "locate":
+            print(json.dumps({"id": rid, "ok": True, **locate(req["from"], req["to"])}), flush=True)
         elif op == "install":
-            install(req["from"], req["to"])
+            install(req["from"], req["to"], req.get("path"))
             print(json.dumps({"id": rid, "ok": True, "pairs": pairs()}), flush=True)
         else:
             t = translation_for(req["from"], req["to"])

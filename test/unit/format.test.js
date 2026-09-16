@@ -79,6 +79,48 @@ test("chunking is lossless and fast-start splits only a long opening sentence", 
   assert.ok(uniform.length >= 3 && uniform.every((c) => c.length <= 62));
 });
 
+test("a sentence far longer than the plan is cut at its clauses; one that fits is left whole", () => {
+  const long =
+    "The second sentence is a little longer and carries on for a while, so that the next chunk has to be generated while this one is still being played.";
+  const text = `${long} Then a short one.`;
+  const small = chunkForSpeech(text, [45, 70, 90], false);
+  assert.equal(small[0], "The second sentence is a little longer and carries on for a while,");
+  assert.ok(
+    small.every((c) => c.length <= 90),
+    small.join(" | ")
+  );
+  assert.equal(small.join(" "), text);
+  // The same sentence fits an engine whose chunks are large, and stays whole.
+  assert.equal(chunkForSpeech(text, [150, 350, 600], false)[0], long);
+  // No clause boundary within the limit: the stretch stays whole rather than being cut mid-phrase.
+  const unbroken = "A".repeat(120) + " and then, finally, a clause.";
+  assert.equal(chunkForSpeech(unbroken, [45, 70, 90], false)[0], unbroken);
+  // A thousands separator and a clock time are not clause boundaries: the
+  // last one inside the limit is where the cut goes, and taken at "2,500"
+  // it read "two" and "five hundred" as two utterances.
+  const numbers =
+    "The tests passed by 10:30, and the build then produced 1,000 files with 2,500 assertions in 11:45 minutes and a lot of other output that went on for a while.";
+  const cut = chunkForSpeech(numbers, [45, 70, 90], false);
+  assert.equal(cut[0], "The tests passed by 10:30,", cut.join(" | "));
+  assert.equal(cut.join(" "), numbers);
+});
+
+test("a verb-and-argument announcement comes apart for translation, a labelled one does not", () => {
+  const { announcementParts } = require("../../out/speech/format.js");
+  assert.deepEqual(announcementParts("Writing edit_design.py"), {
+    phrase: "Writing the file",
+    argument: "edit_design.py",
+    translateArgument: false,
+  });
+  assert.deepEqual(announcementParts("Searching the web for cheap flights"), {
+    phrase: "Searching the web for",
+    argument: "cheap flights",
+    translateArgument: true,
+  });
+  assert.equal(announcementParts("Bash: run the tests"), undefined, "the glossary hides its label instead");
+  assert.equal(announcementParts("Fetching a web page"), undefined);
+});
+
 test("utterancesFromLine handles text, tools, errors, sidechains", () => {
   const opts = { speakText: true, speakTools: true, speakErrors: true, speakSubagents: false, chunkChars: 260 };
   const names = new Map();

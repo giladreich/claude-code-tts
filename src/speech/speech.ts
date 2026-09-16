@@ -6,6 +6,9 @@ import { qwen3Backend } from "../tts/qwen3";
 import { systemBackend } from "../tts/system";
 import { detectLanguage, engineSpeaks, LanguageTracker } from "../language/language";
 import { Backend, LanguageVoice, SpeakRequest, Speaker, SpeechConfig } from "../tts/types";
+import { getPersistentPlayer } from "../tts/audio";
+import { playWavFile } from "../tts/wavPlayers";
+import { wavFileSeconds } from "../tts/wav";
 
 export { SpeechConfig } from "../tts/types";
 
@@ -17,7 +20,7 @@ const ENGINES: Record<
   SpeechConfig["engine"],
   (config: SpeechConfig, onError: (msg: string) => void) => Backend | undefined
 > = {
-  system: (_config, onError) => systemBackend(onError),
+  system: (config, onError) => systemBackend(onError, config.systemHostScript),
   piper: (config, onError) => piperBackend(config.piperPath, onError, config.postSynthesis),
   kokoro: (config, onError) =>
     kokoroBackend(config.kokoroDir, config.kokoroDaemonScript, () => config.pauseScale, onError),
@@ -275,6 +278,11 @@ export class SpeechQueue {
   /** Language of the message being spoken, kept across short utterances. */
   private languages = new LanguageTracker();
 
+  /** How long a merged utterance may grow: the engine's own chunk size where it has one. */
+  private coalesceMax(): number {
+    return Math.min(COALESCE_MAX, this.config.coalesceMax ?? COALESCE_MAX);
+  }
+
   enqueue(text: string, group?: string): void {
     // Last line of defence for every path into the queue (translation,
     // selection, tests): an utterance with nothing to pronounce is dropped
@@ -288,8 +296,12 @@ export class SpeechQueue {
     }
     // Coalesce small backlogged utterances (bursts of tool announcements):
     // one synthesis + one playback instead of paying per-utterance overhead.
+    // Up to the engine's own limit: the chunks a slow streaming engine is
+    // given are sized so that the wait for each falls between sentences,
+    // and merging two of them back into one made a 10-second utterance
+    // that opened with five seconds of silence and stuttered inside.
     const last = this.queue[this.queue.length - 1];
-    if (last !== undefined && last.text.length + text.length + 2 <= COALESCE_MAX) {
+    if (last !== undefined && last.text.length + text.length + 2 <= this.coalesceMax()) {
       const sep = /[.!?]$/.test(last.text.trimEnd()) ? " " : ". ";
       last.text = last.text + sep + text; // the merged utterance keeps the first one's message
     } else {
@@ -372,7 +384,9 @@ export class SpeechQueue {
     rate?: number,
     onDone?: () => void,
     engine?: SpeechConfig["engine"],
-    inVoice?: string
+    inVoice?: string,
+    /** The language of the sample; detected from it when not stated. */
+    language?: string
   ): void {
     // A voice owned by another engine (a Piper model auditioned while
     // Chatterbox is active) has to be spoken by that engine, or the main one
@@ -383,6 +397,58 @@ export class SpeechQueue {
       onDone?.();
       return;
     }
+    this.beginPreview(onDone);
+
+    // Stated or detected, never left out: a Qwen3 clone told nothing falls
+    // back to the language it was made for, and a German voice auditioned
+    // with an English sentence then read English as if it were German.
+    const req: SpeakRequest = {
+      text,
+      wpm: rate ?? this.config.rate,
+      voice,
+      volume: this.config.volume,
+      preview: true,
+      language: language ?? (this.config.autoLanguage ? detectLanguage(text) : undefined),
+    };
+    const speaker: Speaker = backend.speak(
+      req,
+      () => this.endPreview(speaker),
+      (msg) => this.onError(`preview: ${msg}`)
+    );
+    this.previewSpeaker = speaker;
+    this.onStateChange?.(true);
+  }
+
+  /**
+   * Play a ready-made recording as a preview (a notification sound, a
+   * voice's sample), with the same interruption and resumption as
+   * preview(): through the persistent player where there is one, which is
+   * the path speech takes, takes the volume and starts at once; otherwise
+   * through a player of its own per file.
+   */
+  previewFile(file: string, volume: number, onDone?: () => void): void {
+    this.beginPreview(onDone);
+    const persistent = getPersistentPlayer();
+    let speaker: Speaker;
+    if (persistent) {
+      const playback = persistent.play(file, 1, Math.max(0, Math.min(1, volume / 100)));
+      speaker = { kill: () => playback.cancel() };
+      playback.done.then(
+        () => this.endPreview(speaker),
+        () => this.endPreview(speaker)
+      );
+    } else {
+      // No end signal from a spawned player: the file's length is the end.
+      const playing = playWavFile(file, volume);
+      speaker = { kill: () => playing.stop() };
+      setTimeout(() => this.endPreview(speaker), Math.round(((wavFileSeconds(file) ?? 2) + 0.2) * 1000));
+    }
+    this.previewSpeaker = speaker;
+    this.onStateChange?.(true);
+  }
+
+  /** What every preview does first: supersede the one before it and set the queue aside. */
+  private beginPreview(onDone?: () => void): void {
     this.previewActive = true;
     if (this.previewSpeaker) {
       this.previewSpeaker.kill();
@@ -400,32 +466,19 @@ export class SpeechQueue {
         this.queue.unshift({ text: interrupted, group });
       }
     }
+  }
 
-    const req: SpeakRequest = {
-      text,
-      wpm: rate ?? this.config.rate,
-      voice,
-      volume: this.config.volume,
-      preview: true,
-    };
-    const speaker: Speaker = backend.speak(
-      req,
-      () => {
-        // Superseded by a newer preview
-        if (this.previewSpeaker !== speaker) {
-          return;
-        }
-        this.previewSpeaker = undefined;
-        this.previewActive = false;
-        this.previewDone?.();
-        this.previewDone = undefined;
-        this.pump();
-        this.onStateChange?.(this.current !== undefined);
-      },
-      (msg) => this.onError(`preview: ${msg}`)
-    );
-    this.previewSpeaker = speaker;
-    this.onStateChange?.(true);
+  /** A preview ended on its own; a superseded one changes nothing. */
+  private endPreview(speaker: Speaker): void {
+    if (this.previewSpeaker !== speaker) {
+      return;
+    }
+    this.previewSpeaker = undefined;
+    this.previewActive = false;
+    this.previewDone?.();
+    this.previewDone = undefined;
+    this.pump();
+    this.onStateChange?.(this.current !== undefined);
   }
 
   /** End any preview and let the main queue continue. */
@@ -770,7 +823,7 @@ export class SpeechQueue {
       // synthesis. On an engine that cannot abort a running generation each
       // one costs seconds, so the tail waits until it can no longer grow.
       // queue[0] is always prepared: it plays next.
-      if (i > 0 && i === this.queue.length - 1 && next.text.length + 3 <= COALESCE_MAX) {
+      if (i > 0 && i === this.queue.length - 1 && next.text.length + 3 <= this.coalesceMax()) {
         return;
       }
       const plan = this.planFor(next.text);

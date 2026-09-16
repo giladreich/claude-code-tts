@@ -8,9 +8,9 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { ROOT, tmpDir } = require("../helpers");
+const { ROOT, tmpDir, plainPython } = require("../helpers");
 
-const python = process.platform === "win32" ? "python" : "python3";
+const python = plainPython() ?? "python3";
 
 /** Stand-ins that mark what they touched, so the caller can see the reach. */
 function fakeModules(dir) {
@@ -41,11 +41,19 @@ def predict(text, model, maxlen=10000):
   return dir;
 }
 
-/** prepare(text, language) in a subprocess, with whichever modules `dir` holds. */
+/**
+ * prepare(text, language) in a subprocess, with whichever modules `dir` holds.
+ * -S keeps site-packages off sys.path. The interpreter the helpers find first
+ * is a uv tool venv, and on a machine that actually speaks Hebrew it holds the
+ * real nakdimon and num2words, which would answer the "missing package" case
+ * instead of the fallbacks. PYTHONPATH is read with or without -S, so the fake
+ * modules below still load.
+ */
 function prepare(text, language, dir) {
   const r = spawnSync(
     python,
     [
+      "-S",
       "-c",
       "import json,sys; sys.path.insert(0, sys.argv[1]); from diacritize import prepare; print(json.dumps(prepare(sys.argv[2], sys.argv[3])))",
       path.join(ROOT, "assets"),
@@ -106,6 +114,15 @@ test("speech continues when the packages are missing", () => {
   // The whole point of the fallbacks: a missing package costs pronunciation,
   // never speech. An empty directory has neither module.
   const dir = tmpDir("cv-dia-bare-");
+  const seen = spawnSync(
+    python,
+    ["-S", "-c", 'import importlib.util as u; print([m for m in ("nakdimon", "num2words") if u.find_spec(m)])'],
+    {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONPATH: dir },
+    }
+  );
+  assert.equal(seen.stdout.trim(), "[]", "this case needs an interpreter that cannot import the real packages");
   const text = "כל 118 הבדיקות עוברות.";
   assert.equal(prepare(text, "he", dir), text);
   assert.equal(prepare("118 اختبارا.", "ar", dir), "118 اختبارا.");

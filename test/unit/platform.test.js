@@ -322,3 +322,105 @@ test("the install command offered names this machine's package manager, and Wind
   assert.equal(win, "winget install Gyan.FFmpeg");
   assert.match(hint, /Restart VSCode/);
 });
+
+test("Windows refusing an unsigned library is explained with the way out, and Check Setup warns while it would", () => {
+  const { explainPlatformError } = require("../../out/platform/platform.js");
+  const raw =
+    '[WinError 4551] An Application Control policy has blocked this file. Error loading "C:\\Users\\u\\AppData\\Roaming\\uv\\tools\\qwen-tts\\Lib\\site-packages\\torch\\lib\\shm.dll"';
+  const explained = explainPlatformError(raw);
+  assert.ok(explained.startsWith(raw), "the original error is kept");
+  assert.match(explained, /Smart App Control/);
+  assert.match(explained, /built-in Windows voice is signed by Microsoft/);
+  assert.equal(explainPlatformError("daemon exited with 1"), "daemon exited with 1", "other errors pass through");
+  const diagnosticsBase = () => ({
+    ffmpeg: true,
+    ffplay: true,
+    pythonInstaller: true,
+    backups: true,
+    engine: "qwen3",
+    engineName: "qwen3 (torch)",
+    engineReady: true,
+    kokoroReady: true,
+    kokoroDaemon: true,
+    qwen3Runtime: "torch",
+    piperAvailable: true,
+    persistentPlayer: false,
+    playerName: "ffplay",
+    playerTempo: true,
+    hooksInstalled: true,
+    voices: 1,
+    chatterboxRuntime: "torch",
+    chatterboxDiacritizer: true,
+    listenTo: "everywhere",
+    terminalOwner: true,
+    windows: 1,
+    speakLanguage: "",
+    translationReady: false,
+    translationPairs: [],
+  });
+  const rows = checkSetup({ ...diagnosticsBase(), appControl: "on" });
+  const row = rows.find((r) => r.name === "Windows Smart App Control");
+  assert.ok(row, "a warning row");
+  assert.equal(row.status, "partial");
+  assert.equal(
+    checkSetup({ ...diagnosticsBase(), appControl: "off" }).find((r) => r.name === "Windows Smart App Control"),
+    undefined
+  );
+  // The evaluation period blocks nothing yet: a note, not a warning.
+  const evaluation = checkSetup({ ...diagnosticsBase(), appControl: "evaluation" }).find(
+    (r) => r.name === "Windows Smart App Control"
+  );
+  assert.equal(evaluation.status, "ok");
+  assert.match(evaluation.detail, /nothing is blocked yet/);
+  assert.match(row.detail, /only while it is off/, "the condition, stated");
+  assert.doesNotMatch(row.detail, /turned on again/);
+});
+
+test("on a Windows with no node, the hook runs through the batch file that starts the editor as node", () => {
+  const { resolveNodeCommand } = require("../../out/platform/platform.js");
+  const opts = {
+    path: "C:\\Windows\\system32",
+    electron: "C:\\Program Files\\VS Code\\Code.exe",
+    platform: "win32",
+    exists: () => false,
+  };
+  assert.equal(resolveNodeCommand(opts), "node", "nothing better without the wrapper");
+  assert.equal(
+    resolveNodeCommand({
+      ...opts,
+      wrapper: "C:\\Users\\me\\AppData\\Roaming\\Code\\User\\globalStorage\\x\\claude-code-tts-notify.cmd",
+    }),
+    "C:\\Users\\me\\AppData\\Roaming\\Code\\User\\globalStorage\\x\\claude-code-tts-notify.cmd",
+    "a path without spaces needs no quotes, as the other interpreters"
+  );
+  assert.equal(
+    resolveNodeCommand({ ...opts, wrapper: "C:\\Users\\my name\\claude-code-tts-notify.cmd" }),
+    '"C:\\Users\\my name\\claude-code-tts-notify.cmd"'
+  );
+  // A node on the PATH still wins.
+  assert.equal(
+    resolveNodeCommand({ ...opts, exists: (c) => c === "C:\\Windows\\system32\\node.exe", wrapper: "C:\\w.cmd" }),
+    "C:\\Windows\\system32\\node.exe"
+  );
+});
+
+test("an archive is handed to tar by name from its own directory, never with a drive letter", () => {
+  // GNU tar reads "C:" in an archive name as a host to connect to.
+  const { tarArchiveArg } = require("../../out/platform/platform.js");
+  const os = require("os");
+  const archive = path.join(os.tmpdir(), "voices.cvvoices.tgz");
+  const arg = tarArchiveArg(archive);
+  assert.equal(arg.file, "voices.cvvoices.tgz");
+  assert.ok(!arg.file.includes(":"));
+  assert.equal(path.join(arg.cwd, arg.file), archive);
+});
+
+test("a directory is handed to tar with forward slashes, which it does not unescape", () => {
+  // GNU tar turns "\t" in the directory of -C into a tab: every private uv
+  // unpack directory ends in "\uv\tmp" (measured: "Cannot open").
+  const { tarDirArg } = require("../../out/platform/platform.js");
+  const dir = ["C:", "Users", "tom", "uv", "tmp"].join(path.sep);
+  const arg = tarDirArg(dir);
+  assert.ok(!arg.includes("\\"), arg);
+  assert.equal(arg.split("/").join(path.sep), dir);
+});

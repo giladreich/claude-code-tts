@@ -59,10 +59,18 @@ export interface StreamTask {
   /** Resolves after the final part has been delivered. */
   promise: Promise<void>;
   cancel: () => void;
+  /**
+   * The utterance is being played now. An engine that generates several
+   * utterances together streams the one it was asked for and holds the
+   * others' audio until they are wanted; this asks for it.
+   */
+  hot?: () => void;
 }
 
 interface Synthesis {
   promise: Promise<string>; // resolves to wav path
+  /** Where the audio is written, known before it is: what a cancelled synthesis leaves behind is removed by name. */
+  wav: string;
   cancel: () => void;
   /** Speed baked into the synthesized audio itself (vs natural pace). */
   synthSpeed: number;
@@ -156,7 +164,9 @@ export function synthesizeThenPlayBackend(params: {
   const sustainableTempo = () => 1 / effectiveRtf();
   const player = findWavPlayer();
   const naturalWpm = params.naturalWpm ?? 175;
-  const tempoCapable = player?.supportsTempo ?? false;
+  // The persistent player plays whatever it can; where it does not stretch
+  // time (the Windows host), rates are baked into synthesis instead.
+  const tempoCapable = getPersistentPlayer()?.supportsTempo ?? player?.supportsTempo ?? false;
   /** synthSpeed of the playback currently on the persistent player. */
   let liveSynthSpeed: number | undefined;
   /**
@@ -256,13 +266,13 @@ export function synthesizeThenPlayBackend(params: {
         })
       );
       promise.catch(() => {});
-      return { promise, cancel: task.cancel, synthSpeed };
+      return { promise, wav, cancel: task.cancel, synthSpeed };
     }
 
     if (!params.buildSynth) {
       const promise = Promise.reject<string>(new Error("engine daemon unavailable and no CLI fallback exists"));
       promise.catch(() => {});
-      return { promise, cancel: () => {}, synthSpeed };
+      return { promise, wav, cancel: () => {}, synthSpeed };
     }
     const { cmd, args, stdinText } = params.buildSynth(text, synthWpm, voice, wav);
     // stderr is kept (last few hundred characters): "exited with 1" alone
@@ -295,6 +305,7 @@ export function synthesizeThenPlayBackend(params: {
     promise.catch(() => {}); // avoid unhandled rejection when nobody awaits yet
     return {
       promise,
+      wav,
       cancel: () => {
         try {
           proc.kill("SIGKILL");
@@ -302,6 +313,21 @@ export function synthesizeThenPlayBackend(params: {
       },
       synthSpeed,
     };
+  }
+
+  /**
+   * Cancel a prepared synthesis nobody will play and remove its file. By
+   * name and at once, then again when the work settles either way: a
+   * cancelled synthesis rejects, and cleanup that waited for it to resolve
+   * left a WAV in the temp directory for every skipped or superseded
+   * utterance. Only entries out of the map come here, so a file handed to
+   * playback is never touched.
+   */
+  function discard(s: Synthesis): void {
+    s.cancel();
+    const remove = () => fs.unlink(s.wav, () => {});
+    remove();
+    s.promise.then(remove, remove);
   }
 
   /**
@@ -318,6 +344,8 @@ export function synthesizeThenPlayBackend(params: {
     listener?: (file: string, final: boolean) => void;
     onFinished?: () => void;
     cancel: () => void;
+    /** Tell the engine this one is being played now (see StreamTask.hot). */
+    hot: () => void;
   }
   const streamSessions = new Map<string, StreamSession>();
 
@@ -329,7 +357,7 @@ export function synthesizeThenPlayBackend(params: {
     language?: string
   ): StreamSession | undefined {
     const base = path.join(os.tmpdir(), `claude-code-tts-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    const session: StreamSession = { parts: [], emitted: 0, finished: false, cancel: () => {} };
+    const session: StreamSession = { parts: [], emitted: 0, finished: false, cancel: () => {}, hot: () => {} };
     let tFirst = 0;
     let audioSinceFirst = 0;
     const task = params.synthesizeStream!(
@@ -381,6 +409,7 @@ export function synthesizeThenPlayBackend(params: {
       task.cancel();
       removeAllParts();
     };
+    session.hot = () => task.hot?.();
     task.promise.then(
       () => {
         // Non-streaming daemons answer with the whole file and no parts.
@@ -427,8 +456,11 @@ export function synthesizeThenPlayBackend(params: {
     // engine's natural pace (slow-motion speech is not an improvement).
     const ceiling = () => clamp(Math.max(1, sustainableTempo()), TEMPO_MIN, TEMPO_MAX);
     const requested = clamp(wantedOf(lastWpm) / synthSpeed, TEMPO_MIN, TEMPO_MAX);
-    const tempo = playbackTempo(Math.min(requested, ceiling()));
-    if (tempo < requested - 0.02) {
+    // A player that cannot stretch time (the Windows host) plays at the
+    // engine's own pace, and the pipeline plans for that.
+    const stretching = persistent.supportsTempo;
+    const tempo = stretching ? playbackTempo(Math.min(requested, ceiling())) : 1;
+    if (stretching && tempo < requested - 0.02) {
       pipelineLog(
         `playing at ${tempo.toFixed(2)}x instead of ${requested.toFixed(2)}x: the engine synthesizes at ${(1 / effectiveRtf()).toFixed(2)}x realtime`
       );
@@ -436,16 +468,29 @@ export function synthesizeThenPlayBackend(params: {
     // Prebuffer: playback must not outrun synthesis or every part boundary
     // becomes a stutter. Audio is consumed at `tempo` seconds of audio per
     // wall second and produced at 1/rtf; over an utterance of L audio
-    // seconds the shortfall is L * (tempo * rtf - 1), which must be in the
-    // buffer before playback starts. Fast engines start at once.
+    // seconds production must end no later than playback, so playback waits
+    // L * (tempo * rtf - 1) wall seconds, in which the engine makes 1/rtf
+    // of that in audio: L * (pace - 1) / pace, and that is what the buffer
+    // holds before playback starts. (It used to hold the wall-clock figure,
+    // which on an engine 1.9x slower than speech waited for 1.9 times the
+    // audio it needed.) Fast engines start at once.
     const rtf = effectiveRtf();
+    const pace = tempo * rtf;
     const audioSecs = ((req.text.length / 5.5 / naturalWpm) * 60) / synthSpeed; // ~5.5 chars per word
-    const deficit = Math.max(0, audioSecs * (tempo * rtf - 1)) * 1.1;
+    const deficit = Math.max(0, (audioSecs * (pace - 1)) / pace) * 1.1;
     // Waiting is only worth it up to a point. Within this bound, buffering
     // buys continuous speech; beyond it the wait itself becomes the problem
     // (and prewarming the next chunk hides most of it anyway).
-    const MAX_PREBUFFER_SECONDS = 2;
-    const prebufferSecs = Math.min(audioSecs, MAX_PREBUFFER_SECONDS, (rtf > 0.5 ? 0.4 : 0.1) + deficit);
+    // A player that cannot stretch time cannot ease playback to what the
+    // engine feeds either, so a short buffer there is heard as stutter
+    // inside the sentence: it waits for the whole shortfall (the chunks are
+    // sentence-sized on such engines, so that wait is a pause between two),
+    // plus one part's worth, because audio lands a part at a time and
+    // playback must not reach the end of one before the next is there.
+    const MAX_PREBUFFER_SECONDS = stretching ? 2 : 6;
+    const PART_SECONDS = 1; // what the streaming daemons hand out at a time
+    const base = stretching ? (rtf > 0.5 ? 0.4 : 0.1) : PART_SECONDS / Math.max(1, pace);
+    const prebufferSecs = Math.min(audioSecs, MAX_PREBUFFER_SECONDS, base + deficit);
     if (deficit > 0.5) {
       pipelineLog(
         `prebuffering ${prebufferSecs.toFixed(1)}s (synthesis ${rtf.toFixed(2)}x realtime, tempo ${tempo.toFixed(2)}, sustainable ${sustainableTempo().toFixed(2)})`
@@ -491,7 +536,7 @@ export function synthesizeThenPlayBackend(params: {
         return;
       }
       const lead = fedSecs - ((Date.now() - playStartedAt) / 1000) * liveTempo;
-      if (lead < 0.35 && liveTempo > 0.82) {
+      if (stretching && lead < 0.35 && liveTempo > 0.82) {
         // Down to 0.8x if it must: speech that flows a little slowly is far
         // easier to follow than speech that stops at every part boundary.
         liveTempo = Math.max(0.8, liveTempo * 0.85);
@@ -582,6 +627,9 @@ export function synthesizeThenPlayBackend(params: {
       feed(p.file, p.final);
     }
     session.listener = feed;
+    if (!session.finished) {
+      session.hot();
+    }
     session.onFinished = closeOnFailure;
     if (session.finished) {
       closeOnFailure();
@@ -624,7 +672,7 @@ export function synthesizeThenPlayBackend(params: {
       let heldWav: string | undefined;
       const synthSpeed = splitSynthSpeed(wantedOf(wpm));
       const k = key(text, voice, synthSpeed, language);
-      const streaming = params.synthesizeStream && tempoCapable && getPersistentPlayer();
+      const streaming = params.synthesizeStream && getPersistentPlayer();
       if (streaming) {
         let session = streamSessions.get(k);
         let sessionSpeed = synthSpeed;
@@ -798,11 +846,11 @@ export function synthesizeThenPlayBackend(params: {
     prewarm({ text, wpm, voice, language }) {
       const synthSpeed = splitSynthSpeed(wantedOf(wpm));
       const k = key(text, voice, synthSpeed, language);
-      if (params.synthesizeStream && tempoCapable && getPersistentPlayer()) {
+      if (params.synthesizeStream && getPersistentPlayer()) {
         if (streamSessions.has(k)) {
           return;
         }
-        if (streamSessions.size >= 2) {
+        if (streamSessions.size >= maxPrepared) {
           const [oldKey, old] = streamSessions.entries().next().value!;
           streamSessions.delete(oldKey);
           old.cancel();
@@ -810,6 +858,17 @@ export function synthesizeThenPlayBackend(params: {
         const session = startStream(text, voice, synthSpeed, false, language);
         if (session) {
           streamSessions.set(k, session);
+          // A preparation that fails before its turn is forgotten, and the
+          // chunk is synthesized when it comes up. Kept, it was played as
+          // the chunk's own failure: the model swapped under it for a voice
+          // change, or the engine declined to prepare it while busy, and
+          // the sentence was reported as failed instead of being spoken.
+          session.onFinished = () => {
+            if (session.error && streamSessions.get(k) === session) {
+              streamSessions.delete(k);
+              session.cancel();
+            }
+          };
           return;
         }
         // The engine declined to stream this one (Chatterbox streams only the
@@ -824,10 +883,18 @@ export function synthesizeThenPlayBackend(params: {
       if (prewarmed.size >= maxPrepared) {
         const [oldestKey, oldest] = prewarmed.entries().next().value!;
         prewarmed.delete(oldestKey);
-        oldest.cancel();
-        oldest.promise.then((wav) => fs.unlink(wav, () => {})).catch(() => {});
+        discard(oldest);
       }
-      prewarmed.set(k, synth(text, voice, synthSpeed, false, language));
+      const s = synth(text, voice, synthSpeed, false, language);
+      prewarmed.set(k, s);
+      // Same as the stream sessions above: a whole preparation that fails
+      // is dropped, not handed to the chunk at its turn.
+      s.promise.catch(() => {
+        if (prewarmed.get(k) === s) {
+          prewarmed.delete(k);
+          discard(s);
+        }
+      });
     },
     flush() {
       for (const session of streamSessions.values()) {
@@ -835,8 +902,7 @@ export function synthesizeThenPlayBackend(params: {
       }
       streamSessions.clear();
       for (const s of prewarmed.values()) {
-        s.cancel();
-        s.promise.then((wav) => fs.unlink(wav, () => {})).catch(() => {});
+        discard(s);
       }
       prewarmed.clear();
     },

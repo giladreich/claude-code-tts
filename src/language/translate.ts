@@ -9,10 +9,12 @@
  */
 
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { splitSentences } from "../speech/format";
 import { maskTerms, restoreTerms, stripMarks, survivingMarks } from "./glossary";
 import { uvToolPython } from "../platform/platform";
+import { download } from "../tts/net";
 import { PyTtsDaemon } from "../tts/pyDaemon";
 
 export function findTranslatePython(): string | undefined {
@@ -40,6 +42,8 @@ export interface TranslatorOptions {
   keepTerms?: () => string[];
   /** Injected in tests. */
   python?: string;
+  /** How a model file is fetched (net.ts download); a test serves a local file. */
+  fetch?: typeof download;
 }
 
 /**
@@ -155,12 +159,28 @@ export class Translator {
   }
 
   /** Download a model for a pair. Explicit, user-initiated, ~100 MB. */
-  async install(from: string, to: string): Promise<void> {
+  /**
+   * Fetch and install one direction's model. The daemon says where the
+   * model is published and installs the file; the fetch itself is this
+   * extension's (net.ts), so it goes through the editor's proxy and reports
+   * its bytes and total to `onBytes` as every other download does.
+   */
+  async install(from: string, to: string, onBytes: (n: number, total?: number) => void = () => {}): Promise<void> {
     const d = this.connect();
     if (!d) {
       throw new Error("the translation runtime is not installed");
     }
-    await d.request({ op: "install", from, to }).promise;
+    const where = (await d.request({ op: "locate", from, to }).promise) as { url?: unknown; name?: unknown };
+    if (typeof where.url !== "string" || typeof where.name !== "string") {
+      throw new Error(`the translation index names no download for ${from} to ${to}`);
+    }
+    const file = path.join(os.tmpdir(), `claude-code-tts-${process.pid}-${where.name}`);
+    try {
+      await (this.opts.fetch ?? download)(where.url, file, onBytes);
+      await d.request({ op: "install", from, to, path: file }).promise;
+    } finally {
+      fs.rm(file, { force: true }, () => {});
+    }
     this.missingUntil.delete(`${from}>${to}`);
     this.reportedMissing.delete(`${from}>${to}`);
   }
@@ -212,10 +232,14 @@ export class Translator {
         );
         result = await this.attempt(d, text, from, to, []);
       }
-      if (result.damage === "copied") {
+      if (result.damage === "copied" || (result.total > 0 && result.kept < result.total / 2)) {
         // These models handle a short input differently from a paragraph, so
-        // whatever came back in the language it was written in is asked for
-        // again, one sentence at a time.
+        // whatever came back in the language it was written in, or without
+        // most of its identifiers, is asked for again, one sentence at a
+        // time (a shorter input keeps its placeholders better), and a
+        // sentence that still loses them is translated with them in the
+        // open. A whole paragraph used to be spoken in the wrong language
+        // whenever the model dropped half the identifiers of one sentence.
         result = await this.sentenceBySentence(d, text, from, to);
       }
       // Holes are worse than English: a translation missing most of its
@@ -247,8 +271,15 @@ export class Translator {
    * back: the placeholders that survived, and whether any sentence was
    * handed back in the language it was written in.
    */
-  private async attempt(d: PyTtsDaemon, text: string, from: string, to: string, glossary: string[]): Promise<Attempt> {
-    const masked = maskTerms(text, glossary);
+  private async attempt(
+    d: PyTtsDaemon,
+    text: string,
+    from: string,
+    to: string,
+    glossary: string[],
+    hideIdentifiers = true
+  ): Promise<Attempt> {
+    const masked = maskTerms(text, glossary, hideIdentifiers);
     const msg = await d.request({ text: masked.text, from, to }).promise;
     const raw = typeof msg?.text === "string" && msg.text.trim() ? msg.text : masked.text;
     const kept = survivingMarks(raw, masked.terms.length);
@@ -261,17 +292,24 @@ export class Translator {
   }
 
   /**
-   * The last resort before speaking English: every sentence translated on its
-   * own, identifiers hidden and nothing else. A sentence that still comes
-   * back as it was sent is kept as it is, so one stubborn sentence costs its
-   * own words rather than the whole paragraph's.
+   * The last resort before speaking the source language: every sentence
+   * translated on its own, identifiers hidden and nothing else; a sentence
+   * that loses them anyway is translated once more with them in the open
+   * (the model may misspell "foo.ts", but the sentence around it is in the
+   * right language). A sentence that still comes back as it was sent is
+   * kept as it is, so one stubborn sentence costs its own words rather
+   * than the whole paragraph's.
    */
   private async sentenceBySentence(d: PyTtsDaemon, text: string, from: string, to: string): Promise<Attempt> {
     const out: string[] = [];
     for (const sentence of splitSentences(text)) {
       try {
-        const one = await this.attempt(d, sentence, from, to, []);
-        out.push(one.damage === "copied" || one.kept < one.total / 2 ? sentence : one.text);
+        let one = await this.attempt(d, sentence, from, to, []);
+        if (one.damage === "copied" || one.kept < one.total / 2) {
+          const bare = await this.attempt(d, sentence, from, to, [], false);
+          one = bare.damage === "copied" ? { ...one, damage: "copied" } : bare;
+        }
+        out.push(one.damage === "copied" ? sentence : one.text);
       } catch {
         out.push(sentence); // this sentence stays as written; the rest still speaks
       }

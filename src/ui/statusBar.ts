@@ -14,6 +14,7 @@ import {
   combine,
   Download,
   expectedBytes,
+  fetchExpectedBytes,
   fractionOf,
   hubDir,
   isFetching,
@@ -34,6 +35,67 @@ let loadingModel = false;
 /** Set while weights are being fetched, so the wait can say how long is left. */
 let downloading: Progress | undefined;
 let downloadTimer: NodeJS.Timeout | undefined;
+/** Closes the generic download notification, while one is open. */
+let closeNotice: (() => void) | undefined;
+/** Flows showing the download in their own notification; the generic one stays away while any does. */
+let claims = 0;
+
+/** What is being fetched right now, added up, for a flow that shows the wait itself. */
+export const downloadProgress = (): Progress | undefined => downloading;
+
+/**
+ * A flow about to report the download in its own notification takes this,
+ * so the same bytes are not shown twice; the release it returns lets the
+ * generic notification back for whatever is still fetching afterwards.
+ */
+export function claimDownloadNotice(): () => void {
+  claims++;
+  closeNotice?.();
+  closeNotice = undefined;
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      claims--;
+    }
+  };
+}
+
+/**
+ * The model weights a runtime is fetching, shown inside a flow's own
+ * notification: the message names what is being fetched with the bytes and
+ * percentage, the bar follows, and `afterFetch` takes over once it is all
+ * there. The generic notification stays away meanwhile. Returns what ends it.
+ */
+export function reportDownloadIn(
+  progress: vscode.Progress<{ message?: string; increment?: number }>,
+  words: { fetching: string; afterFetch: string }
+): () => void {
+  const release = claimDownloadNotice();
+  let reported = 0;
+  const tick = () => {
+    const p = downloading;
+    if (!p) {
+      if (reported === 0) {
+        progress.report({ message: `${words.fetching}...` });
+      }
+      return;
+    }
+    const done = fractionOf(p);
+    const percent = done === undefined ? 0 : Math.round(done * 100);
+    progress.report({
+      message: done !== undefined && done >= 0.999 ? words.afterFetch : `${words.fetching}: ${progressText(p)}`,
+      increment: Math.max(0, percent - reported),
+    });
+    reported = Math.max(reported, percent);
+  };
+  const ticker = setInterval(tick, 2000);
+  tick();
+  return () => {
+    clearInterval(ticker);
+    release();
+  };
+}
 
 /** The speech queue reports what it is doing; the status bar shows it. */
 export function noteSpeaking(isSpeaking: boolean): void {
@@ -114,8 +176,9 @@ export function watchModelDownload(): void {
   // only what has grown here keeps an abandoned partial file from some other
   // tool out of the total.
   const tracked = new Map<string, Download>();
+  /** Totals the hub was asked for, where the cache carries no listing. */
+  const askedTotals = new Map<string, number | undefined>();
   let quiet = 0;
-  let finish: (() => void) | undefined;
   let report: ((value: { message?: string; increment?: number }) => void) | undefined;
   let reported = 0;
 
@@ -125,9 +188,24 @@ export function watchModelDownload(): void {
     }
     downloadTimer = undefined;
     downloading = undefined;
-    finish?.();
-    finish = undefined;
+    closeNotice?.();
+    closeNotice = undefined;
     updateStatus();
+  };
+
+  const totalOf = (name: string): number | undefined => {
+    const fromCache = expectedBytes(hub, name);
+    if (fromCache !== undefined) {
+      return fromCache;
+    }
+    if (!askedTotals.has(name)) {
+      askedTotals.set(name, undefined);
+      // A failed ask (offline) is asked again later; the module rate-limits it.
+      void fetchExpectedBytes(name).then((total) =>
+        total === undefined ? askedTotals.delete(name) : askedTotals.set(name, total)
+      );
+    }
+    return askedTotals.get(name);
   };
 
   downloadTimer = setInterval(() => {
@@ -136,19 +214,21 @@ export function watchModelDownload(): void {
     for (const [name, bytes] of current) {
       if (bytes > (previous.get(name) ?? 0)) {
         grew = true;
-        tracked.set(name, { name, bytes, expected: expectedBytes(hub, name) });
+        tracked.set(name, { name, bytes, expected: totalOf(name) });
       } else if (tracked.has(name)) {
-        tracked.set(name, { ...tracked.get(name)!, bytes });
+        tracked.set(name, { ...tracked.get(name)!, bytes, expected: totalOf(name) });
       }
     }
     previous = current;
 
     if (tracked.size > 0) {
       downloading = combine([...tracked.values()]);
-      if (!finish) {
+      if (!closeNotice && claims === 0) {
         // Only once something is really arriving: a model already on disk
-        // loads in seconds and deserves no notification at all.
-        const shown = new Promise<void>((resolve) => (finish = resolve));
+        // loads in seconds and deserves no notification at all. A flow that
+        // shows the wait in its own notification keeps this one away.
+        const shown = new Promise<void>((resolve) => (closeNotice = resolve));
+        reported = 0;
         vscode.window.withProgress(
           { location: vscode.ProgressLocation.Notification, title: "Claude Code TTS: downloading voice models" },
           (progress) => {

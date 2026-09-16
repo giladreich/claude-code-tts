@@ -198,6 +198,27 @@ export function packageInstallCommand(pkg: string): string {
 }
 
 /**
+ * What Windows means when it refuses to load a library the engines need.
+ *
+ * Smart App Control (Windows 11) and Application Control policies block
+ * program files that are not signed, and the PyTorch wheels the Qwen3 and
+ * Chatterbox engines are made of contain hundreds of unsigned ones, so the
+ * engine dies at import with "[WinError 4551] An Application Control policy
+ * has blocked this file". Nothing here can sign them; the choice is the
+ * user's, or their administrator's.
+ */
+export const WINDOWS_APP_CONTROL_HINT =
+  "Windows refused to load a program file not signed by a known publisher: Smart App Control, or on a managed machine an App Control for Business policy. Every neural voice engine here is built from open-source components that are not signed, so they run only while it is off; the built-in Windows voice is signed by Microsoft and keeps working. The setting is under Windows Security > App & browser control > Smart App Control, or your administrator's.";
+
+/** An engine's error, with the reason and the way out added where Windows caused it. */
+export function explainPlatformError(message: string): string {
+  if (/WinError 4551|Application Control policy/i.test(message)) {
+    return `${message} ${WINDOWS_APP_CONTROL_HINT}`;
+  }
+  return message;
+}
+
+/**
  * Said after offering an install on Windows: a program installed with winget
  * lands on the PATH of new processes only, and the editor's own environment
  * was read when it started.
@@ -234,6 +255,13 @@ export function resolveNodeCommand(opts: {
   electron: string;
   platform: NodeJS.Platform;
   exists: (candidate: string) => boolean;
+  /**
+   * On Windows, a batch file that runs the editor's own binary as node
+   * (see notifySetup.ts): the interpreter when no node is installed at all,
+   * which is the usual state of a Windows machine. A bare "node" there was
+   * a hook that failed on every event, with nothing said anywhere.
+   */
+  wrapper?: string;
 }): string {
   const names = opts.platform === "win32" ? ["node.exe", "node.cmd", "node"] : ["node"];
   // The platform is an argument, so neither the separator nor the delimiter
@@ -254,7 +282,37 @@ export function resolveNodeCommand(opts: {
       }
     }
   }
-  // The editor's own binary is node with a flag; on Windows a shell cannot
-  // carry the variable in front of the command, so the bare name stays.
-  return opts.platform === "win32" ? "node" : `ELECTRON_RUN_AS_NODE=1 ${shellQuote(opts.electron)}`;
+  // The editor's own binary is node with a flag. On Windows the flag is an
+  // environment variable no one command line can carry through every shell
+  // a hook may run under, so a batch file sets it; without one, the bare
+  // name stays.
+  if (opts.platform === "win32") {
+    return opts.wrapper ? shellQuote(opts.wrapper, "win32") : "node";
+  }
+  return `ELECTRON_RUN_AS_NODE=1 ${shellQuote(opts.electron)}`;
+}
+
+/**
+ * How an archive is handed to tar: by name, from its own directory.
+ *
+ * GNU tar reads a colon in the archive name as "host:file" and tries to
+ * reach the host, so on a Windows where Git's tar comes before the system
+ * one on PATH (it did, on the machine this was found on) every archive
+ * under a drive letter failed with "Cannot connect to C:". The tar Windows
+ * ships has no --force-local to turn that off, so the name is kept free of
+ * the drive instead; the -C directory may carry one, both tars take it.
+ */
+export function tarArchiveArg(archive: string): { file: string; cwd: string } {
+  return { file: path.basename(archive), cwd: path.dirname(archive) };
+}
+
+/**
+ * A directory as tar is given it: with forward slashes. GNU tar unescapes
+ * backslash sequences in the directory of -C when it extracts, so a Windows
+ * path with "\t" in it reached it with a tab inside: every private uv unpack
+ * directory ends in "\uv\tmp", and a home folder can start with any escape
+ * letter ("\tom", "\nina"). Both tars take forward slashes on Windows.
+ */
+export function tarDirArg(dir: string): string {
+  return path.normalize(dir).split(path.sep).join("/");
 }

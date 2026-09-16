@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { PyTtsDaemon } = require("../../out/tts/pyDaemon.js");
 const { parseWav } = require("../../out/tts/wav.js");
-const { ROOT, tmpDir, writeWav, pythonWithNumpy, until, sleep } = require("../helpers");
+const { ROOT, tmpDir, writeWav, pythonWithNumpy, until, sleep, plainPython } = require("../helpers");
 
 const python = pythonWithNumpy();
 
@@ -339,11 +339,12 @@ def load_audio(path, sample_rate=24000, **kw):
   );
 }
 
-function daemon(script, cfg, env) {
+function daemon(script, cfg, env, opts = {}) {
   const errors = [];
   const d = new PyTtsDaemon(python, path.join(ROOT, "assets", script), cfg, (m) => errors.push(m), {
     readyTimeoutMs: 20000,
     env,
+    ...opts,
   });
   return { d, errors };
 }
@@ -542,7 +543,8 @@ test("daemon that never becomes ready is killed and reported", async () => {
   const dir = tmpDir("cv-fake-");
   fs.writeFileSync(path.join(dir, "hang.py"), "import time\ntime.sleep(30)\n");
   const errors = [];
-  const d = new PyTtsDaemon("python3", path.join(dir, "hang.py"), {}, (m) => errors.push(m), { readyTimeoutMs: 300 });
+  const interpreter = python ?? plainPython() ?? "python3";
+  const d = new PyTtsDaemon(interpreter, path.join(dir, "hang.py"), {}, (m) => errors.push(m), { readyTimeoutMs: 300 });
   await assert.rejects(d.ready, /did not become ready/);
   await until(() => !d.alive, 2000);
   assert.match(errors[0], /did not become ready/);
@@ -1190,6 +1192,312 @@ test(
       assert.equal(parts.length, 1, "one whole part");
       assert.equal(parts[0].final, true);
       assert.equal(parts[0].file, path.join(out, "f.wav"));
+    } finally {
+      d.dispose();
+    }
+  }
+);
+
+test(
+  "a cancelled request stays cancelled however many cancels follow it",
+  { skip: !python && "no python with numpy" },
+  async () => {
+    // The daemons remembered cancelled ids in a set that was emptied
+    // wholesale once it held a thousand, un-cancelling whatever was still
+    // queued: that request then generated audio nobody would play.
+    const dir = tmpDir("cv-fake-");
+    fakeModules(dir);
+    const { spawn } = require("child_process");
+    const { pythonEnv } = require("../../out/platform/platform.js");
+    const cfg = JSON.stringify({ model: "m", voices: "v", tokens: "t", data_dir: "d" });
+    const proc = spawn(python, [path.join(ROOT, "assets", "kokoro_daemon.py"), cfg], {
+      env: pythonEnv({ PYTHONPATH: dir }),
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const replies = [];
+    let pending = "";
+    proc.stdout.on("data", (d) => {
+      pending += d;
+      const lines = pending.split("\n");
+      pending = lines.pop();
+      for (const line of lines) {
+        if (line.trim()) {
+          replies.push(JSON.parse(line));
+        }
+      }
+    });
+    const send = (o) => proc.stdin.write(JSON.stringify(o) + "\n");
+    try {
+      await until(() => replies.some((r) => r.ready), 20000);
+      const out = tmpDir("cv-parts-");
+      // A long request keeps the daemon busy while the next waits in line.
+      send({
+        id: 1,
+        text: "One two. Three four. Five six. Seven eight.",
+        sid: 0,
+        speed: 1,
+        out: path.join(out, "a.wav"),
+      });
+      send({ id: 2, text: "Later.", sid: 0, speed: 1, out: path.join(out, "b.wav") });
+      send({ cancel: 2 });
+      for (let i = 0; i < 1500; i++) {
+        send({ cancel: 100000 + i }); // requests long finished, or never made
+      }
+      await until(() => replies.some((r) => r.id === 2), 20000);
+      const two = replies.find((r) => r.id === 2);
+      assert.equal(two.ok, false);
+      assert.equal(two.error, "cancelled");
+      assert.equal(fs.existsSync(path.join(out, "b.wav")), false, "no audio was generated for it");
+      assert.equal(replies.find((r) => r.id === 1).ok, true);
+    } finally {
+      proc.kill();
+    }
+  }
+);
+
+/**
+ * torch + qwen_tts fakes for the PyTorch Qwen3 daemon: the talker makes one
+ * 12 Hz frame per step through its forward (which is what the daemon taps to
+ * stream), the codec decoder is causal (a frame decodes to the same 2000
+ * samples wherever it sits), and "RUNAWAY" never stops on its own.
+ */
+function fakeQwenTorch(dir) {
+  fs.mkdirSync(path.join(dir, "torch"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "torch", "__init__.py"),
+    `
+import contextlib, types
+import numpy as np
+backends = types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False))
+cuda = types.SimpleNamespace(is_available=lambda: False, empty_cache=lambda: None)
+float32 = "float32"
+bfloat16 = "bfloat16"
+inference_mode = contextlib.nullcontext
+class Tensor(np.ndarray):
+    def detach(self): return self
+    def float(self): return self
+    def cpu(self): return self
+    def numpy(self): return np.asarray(self)
+    def to(self, *a, **k): return self
+    def item(self): return np.asarray(self).reshape(-1)[0].item()
+def tensor(x): return np.asarray(x).view(Tensor)
+def stack(xs, dim=0): return np.stack([np.asarray(x) for x in xs], axis=dim).view(Tensor)
+def cat(xs, dim=0): return np.concatenate([np.asarray(x) for x in xs], axis=dim).view(Tensor)
+`
+  );
+  fs.mkdirSync(path.join(dir, "qwen_tts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "qwen_tts", "__init__.py"),
+    `
+import time, types
+import numpy as np
+import torch
+SR = 24000
+HOP = 2000  # samples per 12 Hz frame
+EOS = 2150
+class _Tokenizer:
+    def decode(self, items):
+        wavs = []
+        for it in items:
+            codes = np.asarray(it["audio_codes"])
+            t = np.arange(HOP) / SR
+            wav = np.concatenate([0.3 * np.sin(2 * np.pi * (200 + 5 * int(c[0])) * t) for c in codes]) if len(codes) else np.zeros(0)
+            wavs.append(wav.astype(np.float32))
+        return wavs, SR
+class _Talker:
+    def forward(self, codec_ids=None, **kw):
+        return types.SimpleNamespace(hidden_states=(None, codec_ids))
+    def __call__(self, *a, **k):
+        return self.forward(*a, **k)
+class _Inner:
+    def __init__(self):
+        self.talker = _Talker()
+        self.speech_tokenizer = _Tokenizer()
+        self.config = types.SimpleNamespace(talker_config=types.SimpleNamespace(codec_eos_token_id=EOS))
+class Qwen3TTSModel:
+    @classmethod
+    def from_pretrained(cls, model_id, device_map=None, dtype=None):
+        m = cls(); m.model = _Inner(); return m
+    def create_voice_clone_prompt(self, ref_audio, ref_text):
+        # A list of items, as the runtime hands it out: the daemon reads the
+        # reference codes off the first one.
+        n = 3 + sum(ord(c) for c in str(ref_audio)) % 4
+        return [types.SimpleNamespace(ref_code=torch.tensor([[900 + i] + [0] * 15 for i in range(n)]), ref_text=ref_text)]
+    def _frames(self, texts, max_new_tokens, offset):
+        # Every row of the batch advances one frame per step, as the real
+        # talker does; a row past its end shows the stop token from then on.
+        lengths = [10000 if "RUNAWAY" in t else max(3, len(t.split()) * 2) for t in texts]
+        steps = min(max(lengths), max_new_tokens or max(lengths))
+        frames = [[] for _ in texts]
+        for k in range(steps):
+            time.sleep(0.015)  # a cancel has time to land
+            rows = [[offset + k + 1] + [7] * 15 if k < lengths[i] else [EOS] + [0] * 15 for i in range(len(texts))]
+            codec_ids = torch.tensor(rows)
+            self.model.talker.forward(codec_ids=codec_ids)  # what the real talker returns per step
+            for i in range(len(texts)):
+                if k < lengths[i]:
+                    frames[i].append(codec_ids[i])
+            if all(k + 1 >= n for n in lengths):
+                break
+        self.model.talker.forward(codec_ids=torch.tensor([[EOS] + [0] * 15 for _ in texts]))  # the stop frames, never decoded
+        return [torch.stack(f) for f in frames]
+    def generate_custom_voice(self, text="", language="English", speaker="Ryan", max_new_tokens=None, **kw):
+        texts = text if isinstance(text, list) else [text]
+        codes = self._frames(texts, max_new_tokens, 0)
+        wavs, sr = self.model.speech_tokenizer.decode([{"audio_codes": c} for c in codes])
+        return wavs, sr
+    def generate_voice_clone(self, text=None, language=None, voice_clone_prompt=None, max_new_tokens=None, **kw):
+        texts = text if isinstance(text, list) else [text]
+        items = voice_clone_prompt if isinstance(voice_clone_prompt, list) else [voice_clone_prompt]
+        if len(items) == 1 and len(texts) > 1:
+            items = items * len(texts)
+        if len(items) != len(texts):
+            raise ValueError("Batch size mismatch")
+        codes = self._frames(texts, max_new_tokens, 100)
+        fulls = [torch.cat([it.ref_code, c]) for it, c in zip(items, codes)]
+        wavs, sr = self.model.speech_tokenizer.decode([{"audio_codes": f} for f in fulls])
+        out = []
+        for it, f, w in zip(items, fulls, wavs):
+            cut = int(len(it.ref_code) / len(f) * len(w))
+            out.append(w[cut:])
+        return out, sr
+`
+  );
+}
+
+test(
+  "Qwen3 torch daemon: streams parts that add up to the whole, cancels mid-generation, and caps a runaway",
+  { skip: !python && "no python with numpy" },
+  async () => {
+    const dir = tmpDir("cv-fake-qwen-");
+    fakeQwenTorch(dir);
+    const out = tmpDir("cv-parts-");
+    const { d, errors } = daemon(
+      "qwen3_daemon.py",
+      { model_id: "fake", clone: { ref_audio: "ref.wav", ref_text: "hi", gain: 1 } },
+      {
+        PYTHONPATH: dir,
+      }
+    );
+    try {
+      await d.ready;
+      const text = "one two three four five six seven eight nine ten eleven twelve";
+      // The whole utterance, then the same text streamed: the parts are the same audio.
+      await d.request({ text, language: "English", out: path.join(out, "whole.wav") }).promise;
+      const parts = [];
+      const t0 = Date.now();
+      let firstAt = 0;
+      await d.request({ text, language: "English", out: path.join(out, "s.wav"), stream: true }, (f, fin) => {
+        if (parts.length === 0) {
+          firstAt = Date.now() - t0;
+        }
+        parts.push([f, fin]);
+      }).promise;
+      assert.ok(parts.length >= 3, `parts: ${parts.length}`);
+      assert.deepEqual(parts.map((p) => p[1]).slice(-1), [true]);
+      assert.ok(firstAt < 400, `first part after ${firstAt} ms, not the whole utterance`);
+      const pcm = (f) => {
+        const b = fs.readFileSync(f);
+        const i = parseWav(b);
+        return b.subarray(i.dataOffset, i.dataOffset + i.dataLength);
+      };
+      const whole = pcm(path.join(out, "whole.wav"));
+      const joined = Buffer.concat(parts.map((p) => pcm(p[0])));
+      assert.equal(
+        joined.length,
+        whole.length + Math.round(24000 * 0.3) * 2,
+        "the parts are the whole plus the closing breath"
+      );
+      assert.deepEqual(joined.subarray(0, whole.length), whole, "sample for sample");
+      // A cancel lands inside the generation.
+      const long = "RUNAWAY " + "word ".repeat(40);
+      const r = d.request({ text: long, language: "English", out: path.join(out, "c.wav"), stream: true }, () => {});
+      await sleep(200);
+      r.cancel();
+      await assert.rejects(r.promise, /cancelled/);
+      assert.equal(fs.readdirSync(out).filter((f) => f.startsWith("c.")).length, 0, "its parts are removed");
+      // A runaway is capped at what the text can plausibly need.
+      const t1 = Date.now();
+      const rr = await d.request({ text: "RUNAWAY short", language: "English", out: path.join(out, "r.wav") }).promise;
+      assert.ok(Date.now() - t1 < 8000, "the cutoff ends it");
+      assert.ok(rr.audio_s < 20, `audio_s ${rr.audio_s}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      d.dispose();
+    }
+  }
+);
+
+test(
+  "Qwen3 torch daemon: requests queued together are generated together, each answered on its own",
+  { skip: !python && "no python with numpy" },
+  async () => {
+    const dir = tmpDir("cv-fake-qwen-");
+    fakeQwenTorch(dir);
+    const out = tmpDir("cv-batch-");
+    const log = path.join(out, "daemon.log");
+    const { d, errors } = daemon(
+      "qwen3_daemon.py",
+      { model_id: "fake", clone: { ref_audio: "ref.wav", ref_text: "hi", gain: 1 } },
+      { PYTHONPATH: dir },
+      { logFile: log }
+    );
+    try {
+      await d.ready;
+      const words = (n) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
+      const texts = [words(8), words(30), words(12)];
+      const parts = texts.map(() => []);
+      const t0 = Date.now();
+      const firstAt = [];
+      const reqs = texts.map((text, i) =>
+        d.request(
+          { text, language: "English", out: path.join(out, `b${i}.wav`), stream: true, priority: i === 0 ? 1 : 0 },
+          (f, fin) => {
+            if (parts[i].length === 0) {
+              firstAt[i] = Date.now() - t0;
+            }
+            parts[i].push([f, fin]);
+          }
+        )
+      );
+      // The second one is being played once the first is done: it says so,
+      // and from then on gets a part a second rather than one every three.
+      void reqs[0].promise.then(() => reqs[1].hot());
+      const replies = await Promise.all(reqs.map((r) => r.promise));
+      await sleep(50);
+      const stderr = fs.readFileSync(log, "utf8");
+      assert.equal((stderr.match(/"batch": 3/g) ?? []).length, 3, "one generation for the three:" + stderr);
+      for (let i = 0; i < 3; i++) {
+        assert.deepEqual(parts[i].map((p) => p[1]).slice(-1), [true], `request ${i} ends with a final part`);
+        const total = parts[i].reduce((n, p) => n + parseWav(fs.readFileSync(p[0])).dataLength, 0);
+        // 2000 samples of 16-bit per frame, two frames per word, plus the closing breath.
+        const frames = texts[i].split(" ").length * 2;
+        assert.equal(total, frames * 2000 * 2 + Math.round(24000 * 0.3) * 2, `request ${i} audio adds up`);
+        assert.ok(replies[i].ok);
+      }
+      // The first row's whole audio is answered as soon as its frames are in,
+      // not when the longest row ends.
+      assert.ok(
+        replies[0].gen_s < replies[1].gen_s,
+        `short row done at ${replies[0].gen_s}, long at ${replies[1].gen_s}`
+      );
+      assert.ok(firstAt[0] < firstAt[1], "the row being waited for streams first");
+      assert.ok(parts[1].length >= 4, `the promoted row streamed on: ${parts[1].length} parts`);
+      // A cancel drops one row and leaves the others to finish.
+      const again = texts.map((text, i) =>
+        d.request({ text, language: "English", out: path.join(out, `c${i}.wav`), stream: true }, () => {})
+      );
+      await sleep(150);
+      again[1].cancel();
+      await assert.rejects(again[1].promise, /cancelled/);
+      assert.ok((await again[0].promise).ok);
+      assert.ok((await again[2].promise).ok);
+      assert.equal(
+        fs.readdirSync(out).filter((f) => f.startsWith("c1.")).length,
+        0,
+        "the cancelled row's parts are removed"
+      );
+      assert.deepEqual(errors, []);
     } finally {
       d.dispose();
     }

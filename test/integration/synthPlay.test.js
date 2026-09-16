@@ -22,6 +22,7 @@ function fakeStreamEngine(opts = {}) {
     name: "fake",
     naturalWpm: 175,
     typicalRtf: opts.rtf ?? 0.1,
+    lookahead: opts.lookahead,
     synthesizeStream(text, wpm, voice, base, onPart, urgent) {
       const call = { text, voice, urgent, cancelled: false };
       calls.push(call);
@@ -111,13 +112,36 @@ test("prewarm is background priority and is reused by speak", { skip }, async ()
   assert.equal(calls.length, 1, "speak attached to the prewarmed session, no new synthesis");
   await until(() => done, 3000);
   assert.ok(Date.now() - t0 < 900, "prewarmed audio starts immediately");
-  // Eviction: only two stream prewarms are kept.
+  // Eviction: the queue prepares `lookahead` utterances ahead (2 unless the
+  // engine asks for more) and the one being played needs its room too, so
+  // three are kept and the fourth evicts the oldest. A cap below that
+  // cancelled the chunk that was about to be played, every time.
   backend.prewarm({ text: "a", wpm: 175, voice: "v", volume: 0 });
   backend.prewarm({ text: "b", wpm: 175, voice: "v", volume: 0 });
   backend.prewarm({ text: "c", wpm: 175, voice: "v", volume: 0 });
-  assert.ok(calls.find((c) => c.text === "a").cancelled, "oldest prewarm evicted");
+  assert.ok(!calls.find((c) => c.text === "a").cancelled, "everything the queue prepares is kept");
+  backend.prewarm({ text: "d", wpm: 175, voice: "v", volume: 0 });
+  assert.ok(calls.find((c) => c.text === "a").cancelled, "the one beyond that evicts the oldest");
   backend.flush();
-  assert.ok(calls.filter((c) => ["b", "c"].includes(c.text)).every((c) => c.cancelled));
+  assert.ok(calls.filter((c) => ["b", "c", "d"].includes(c.text)).every((c) => c.cancelled));
+});
+
+test("an engine that prepares further ahead keeps room for all of it", { skip }, async () => {
+  // Chatterbox asks for six: with a fixed cap of three, preparing the sixth
+  // cancelled the first, so the queue paid for the chunk it was about to
+  // play and then threw it away.
+  const { backend, calls } = fakeStreamEngine({ parts: 1, partSecs: 0.05, lookahead: 6 });
+  const texts = ["1", "2", "3", "4", "5", "6"];
+  for (const text of texts) {
+    backend.prewarm({ text, wpm: 175, voice: "v", volume: 0 });
+  }
+  assert.equal(calls.length, 6);
+  assert.ok(
+    calls.every((c) => !c.cancelled),
+    "nothing the queue asked for was thrown away"
+  );
+  backend.flush();
+  assert.ok(calls.every((c) => c.cancelled));
 });
 
 test("kill cancels synthesis and playback; pause holds audio until resume", { skip }, async () => {

@@ -8,8 +8,11 @@
  * result. Nothing here shows a voice list: that is the picker's job, reached
  * through a command so this module needs to know nothing about it.
  */
+import { spawnSync } from "child_process";
+import * as fs from "fs";
 import * as vscode from "vscode";
 import { checkSetup, summarize } from "./diagnostics";
+import { appControlNotice } from "./onboarding";
 import { config } from "../core/config";
 import { languageName } from "../language/language";
 import { recommendEngine, recommendedSettings, shouldWriteDefault, thisMachine, wantedLanguages } from "./onboarding";
@@ -23,6 +26,7 @@ import { findKokoroPython, kokoroReady } from "../tts/kokoro";
 import { piperAvailable } from "../tts/piper";
 import {
   CHATTERBOX_TEXT_PACKAGES,
+  textPackageInstalls,
   chatterboxReady,
   chatterboxRuntimePython,
   chatterboxVenv,
@@ -31,12 +35,14 @@ import {
   missingTextPackages,
   resolveChatterboxRuntime,
 } from "../tts/chatterbox";
-import { listQwen3Clones, qwen3Available, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
+import { findQwen3Python, listQwen3Clones, qwen3Available, qwen3VoicesDir, resolveQwen3Runtime } from "../tts/qwen3";
 import { audioSupport } from "../tts/wavPlayers";
 import { getPersistentPlayer } from "../tts/audio";
+import { DownloadReport, reportUvDownloads } from "../ui/downloads";
 import { MenuOutcome, pickWithBack } from "../ui/prompts";
 import { findUv, installPrivateUv, runUv, toolInstallArgs, UV_VERSION, UvInfo } from "../platform/uvBootstrap";
-import { hasCommand, venvPython } from "../platform/platform";
+import { nvidiaDriver, torchCudaOf, torchHasCuda, torchIndexArgs, torchIndexFor, venvOf } from "../platform/gpu";
+import { hasCommand, isMac, isWindows, venvPython } from "../platform/platform";
 
 /** Where a person is sent to install the Piper program themselves. */
 const PIPER_INSTALL_URL = "https://github.com/OHF-Voice/piper1-gpl";
@@ -82,7 +88,54 @@ export async function applyMachineDefaults(): Promise<void> {
  * a comparison table, installs it with the flow that already knows how, and
  * ends where the point of it is: a voice of their own.
  */
+/**
+ * Whether this Windows will run the neural engines right now. Read from the
+ * registry again after a short while rather than once per session: the
+ * setting can be switched either way on current Windows builds (verified on
+ * one), and a person who has just switched it off expects the next install
+ * to go ahead without reloading the window. Only "on" blocks; the
+ * evaluation period runs nothing through it yet.
+ */
+let appControlRead: { at: number; state: ReturnType<typeof windowsAppControl> } | undefined;
+const APP_CONTROL_TTL_MS = 30_000;
+
+export function neuralEnginesBlocked(): boolean {
+  if (!appControlRead || Date.now() - appControlRead.at > APP_CONTROL_TTL_MS) {
+    appControlRead = { at: Date.now(), state: windowsAppControl() };
+  }
+  return appControlRead.state === "on";
+}
+
+/**
+ * Said before any neural engine is installed on a Windows that will not run
+ * it: the fact, and that the built-in voice is what keeps working. Answers
+ * true when the install must not go ahead. Nothing here suggests changing
+ * the security setting; that is the person's or their administrator's call.
+ */
+async function stoppedByAppControl(): Promise<boolean> {
+  if (!neuralEnginesBlocked()) {
+    return false;
+  }
+  await offerBuiltInVoiceInstead();
+  return true;
+}
+
+/** The notice that the neural engines run only while Smart App Control is off, with the built-in voice one click away. */
+export async function offerBuiltInVoiceInstead(): Promise<void> {
+  const CHOOSE = "Choose a built-in voice";
+  const pick = await vscode.window.showInformationMessage(`Claude Code TTS: ${appControlNotice()}`, CHOOSE);
+  if (pick === CHOOSE) {
+    await vscode.workspace
+      .getConfiguration("claudeCodeTts")
+      .update("engine", "system", vscode.ConfigurationTarget.Global);
+    await vscode.commands.executeCommand("claudeCodeTts.selectVoice");
+  }
+}
+
 export async function setupBestVoiceFlow(): Promise<void> {
+  if (await stoppedByAppControl()) {
+    return;
+  }
   const recommended = currentRecommendation();
   const ready =
     recommended.engine === "qwen3"
@@ -200,6 +253,7 @@ export async function checkSetupFlow(back = false): Promise<MenuOutcome> {
     ffplay: hasCommand("ffplay"),
     pythonInstaller: hasCommand("uv") || hasCommand("pipx") || hasCommand("python3") || hasCommand("python"),
     backups: hasCommand("tar"),
+    appControl: windowsAppControl(),
     engine: cfg.engine,
     engineName: runtime.speech?.engineName ?? cfg.engine,
     engineReady: !isEngineLoading() && (runtime.speech?.hasEngine ?? false),
@@ -208,6 +262,11 @@ export async function checkSetupFlow(back = false): Promise<MenuOutcome> {
     qwen3Runtime: resolveQwen3Runtime(cfg.qwen3Runtime),
     chatterboxRuntime: resolveChatterboxRuntime(runtime.context.globalStorageUri.fsPath, cfg.chatterboxRuntime),
     chatterboxDiacritizer: diacritizerReady(runtime.context.globalStorageUri.fsPath, cfg.chatterboxRuntime),
+    // The GPU matters to the PyTorch runtimes only, and this is the report
+    // that may probe the machine.
+    gpu: isMac ? undefined : (await nvidiaDriver())?.gpu,
+    qwen3Cuda: torchCudaOf(findQwen3Python()),
+    chatterboxCuda: torchHasCuda(chatterboxVenv(runtime.context.globalStorageUri.fsPath)),
     listenTo: config().listenTo,
     terminalOwner: runtime.ownership?.isTerminalOwner() ?? true,
     windows: runtime.ownership?.windowCount() ?? 1,
@@ -279,7 +338,7 @@ export async function ensureUvWithConsent(purpose: string): Promise<UvInfo | und
     return existing;
   }
   const go = await vscode.window.showInformationMessage(
-    `${purpose} is a Python package. Claude Code TTS can install it without you running anything: it downloads its own copy of the uv tool (version ${UV_VERSION}, about 15 MB, verified against the checksum the uv project publishes) into its storage folder and installs the package and a Python there. Nothing outside that folder is touched, and "Storage and Cleanup" removes it all in one step.`,
+    `${purpose} is a Python package. Claude Code TTS can install it without you running anything: it downloads its own copy of the uv tool (version ${UV_VERSION}, about ${UV_MB} MB, verified against the checksum the uv project publishes) into its storage folder and installs the package and a Python there. Nothing outside that folder is touched, and "Storage and Cleanup" removes it all in one step.`,
     { modal: true },
     "Download uv and continue"
   );
@@ -293,13 +352,15 @@ export async function ensureUvWithConsent(purpose: string): Promise<UvInfo | und
       cancellable: false,
     },
     async (progress) => {
-      let got = 0;
+      const report = new DownloadReport(progress, "downloading uv");
+      const onBytes = report.file(UV_MB * 1024 * 1024);
       try {
-        await installPrivateUv(storage, (message, bytes) => {
+        await installPrivateUv(storage, (message, bytes, total) => {
           if (bytes) {
-            got += bytes;
+            onBytes(bytes, total);
+          } else {
+            report.message(message);
           }
-          progress.report({ message: bytes ? `${message} (${Math.round(got / 1024 / 1024)} MB)` : message });
         });
         runtime.output.appendLine(`[setup] uv ${UV_VERSION} installed privately under ${storage}`);
         return true;
@@ -321,6 +382,60 @@ export async function ensureUvWithConsent(purpose: string): Promise<UvInfo | und
   return findUv(storage);
 }
 
+/**
+ * Let go of the engine before its runtime is replaced: a daemon holds its
+ * Python and torch libraries open, and on Windows nothing can delete or
+ * overwrite a file another process has open, so a reinstall under a running
+ * daemon failed part-way and left the environment half-replaced. The engine
+ * is rebuilt afterwards by the activation that follows the install.
+ */
+async function releaseEngine(): Promise<void> {
+  runtime.speech?.stop();
+  runtime.speech?.rebuild();
+  await new Promise((r) => setTimeout(r, 500)); // the killed daemon's handles close
+}
+
+/**
+ * The uv arguments that fetch torch built for this machine's GPU, and a log
+ * line saying which; nothing on a machine where the default build fits.
+ */
+async function torchIndexForThisMachine(torch26 = false): Promise<string[]> {
+  const driver = await nvidiaDriver();
+  const index = torchIndexFor(driver, process.platform, torch26);
+  if (driver) {
+    runtime.output.appendLine(
+      `[install] NVIDIA driver for CUDA ${driver.cuda} (${driver.gpu}): ${index ? `torch from ${index}` : "the default torch build"}`
+    );
+  }
+  return torchIndexArgs(index);
+}
+
+/** About what the uv archive weighs, until the server names it. */
+const UV_MB = 15;
+
+/**
+ * Run one uv command under a notification: every line to the log, and the
+ * packages it fetches shown with their sizes and how much of them is done.
+ */
+function runUvReporting(
+  uv: UvInfo,
+  args: string[],
+  tag: string,
+  progress: vscode.Progress<{ message?: string; increment?: number }>,
+  token: vscode.CancellationToken
+): Promise<{ ok: boolean; error?: string }> {
+  const show = reportUvDownloads(progress);
+  return runUv(
+    uv,
+    args,
+    (line) => {
+      runtime.output.appendLine(`[${tag}] ${line}`);
+      show(line);
+    },
+    { onCancel: (kill) => token.onCancellationRequested(kill) }
+  );
+}
+
 /** Install a Python tool through uv with progress and a log; false when it did not succeed. */
 export async function installTool(pkg: string, purpose: string, extra: string[] = []): Promise<boolean> {
   const uv = await ensureUvWithConsent(purpose);
@@ -334,15 +449,8 @@ export async function installTool(pkg: string, purpose: string, extra: string[] 
       cancellable: true,
     },
     async (progress, token) => {
-      const result = await runUv(
-        uv,
-        toolInstallArgs(uv, pkg, extra),
-        (line) => {
-          runtime.output.appendLine(`[install] ${line}`);
-          progress.report({ message: line.slice(0, 60) });
-        },
-        { onCancel: (kill) => token.onCancellationRequested(kill) }
-      );
+      progress.report({ message: "resolving packages..." });
+      const result = await runUvReporting(uv, toolInstallArgs(uv, pkg, extra), "install", progress, token);
       if (!result.ok && result.error !== "cancelled") {
         vscode.window
           .showErrorMessage(`Claude Code TTS: installing ${pkg} did not succeed (${result.error}).`, "Show log")
@@ -442,16 +550,14 @@ export async function ensureChatterboxText(subject?: string, asked = false): Pro
       title: "Claude Code TTS: adding text preparation",
       cancellable: true,
     },
-    async (_progress, token) => {
-      const r = await runUv(
-        uv,
-        ["pip", "install", "--python", python, ...missing],
-        (line) => runtime.output.appendLine(`[chatterbox text] ${line}`),
-        {
-          onCancel: (kill) => token.onCancellationRequested(kill),
+    async (progress, token) => {
+      for (const args of textPackageInstalls(python, missing)) {
+        const r = await runUvReporting(uv, args, "chatterbox text", progress, token);
+        if (!r.ok) {
+          return false;
         }
-      );
-      return r.ok;
+      }
+      return true;
     }
   );
   if (!ok || missingTextPackages(storage, pref).length > 0) {
@@ -527,29 +633,24 @@ export async function installChatterboxRuntime(ask: boolean): Promise<boolean> {
       cancellable: true,
     },
     async (progress, token) => {
+      // Pinned: an unpinned install would silently pull a future release
+      // into the user's environment. setuptools stays bounded rather than
+      // pinned because its watermarker only needs pkg_resources to exist.
+      const installs = textPackageInstalls(venvPython(venv), CHATTERBOX_TEXT_PACKAGES, [
+        ...(await torchIndexForThisMachine(true)),
+        "chatterbox-tts==0.1.7",
+        "setuptools<81",
+      ]);
       const steps: [string, string[]][] = [
         ["creating the environment", ["venv", venv, "--python", "3.12"]],
-        // Pinned: an unpinned install would silently pull a future release
-        // into the user's environment. setuptools stays bounded rather than
-        // pinned because its watermarker only needs pkg_resources to exist.
-        [
-          "downloading packages",
-          [
-            "pip",
-            "install",
-            "--python",
-            venvPython(venv),
-            "chatterbox-tts==0.1.7",
-            "setuptools<81",
-            ...CHATTERBOX_TEXT_PACKAGES.map((p) => p.spec),
-          ],
-        ],
+        ...installs.map((args, i): [string, string[]] => [
+          i === 0 ? "downloading packages" : "adding text preparation",
+          args,
+        ]),
       ];
       for (const [message, args] of steps) {
         progress.report({ message });
-        const r = await runUv(uv, args, (line) => runtime.output.appendLine(`[chatterbox] ${line}`), {
-          onCancel: (kill) => token.onCancellationRequested(kill),
-        });
+        const r = await runUvReporting(uv, args, "chatterbox", progress, token);
         if (!r.ok) {
           return false;
         }
@@ -574,8 +675,31 @@ export async function installChatterboxRuntime(ask: boolean): Promise<boolean> {
  * (its watermarker imports pkg_resources, which newer setuptools dropped).
  */
 export async function setupChatterboxFlow(): Promise<boolean> {
+  if (await stoppedByAppControl()) {
+    return false;
+  }
   const storage = runtime.context.globalStorageUri.fsPath;
   const installed = resolveChatterboxRuntime(storage);
+  if (installed === "torch" && torchHasCuda(chatterboxVenv(storage)) === false) {
+    // Built without the GPU this machine has: the environment is replaced
+    // by one whose torch comes from the index for that GPU.
+    const driver = await nvidiaDriver();
+    if (driver && torchIndexFor(driver, process.platform, true)) {
+      const go = await vscode.window.showInformationMessage(
+        `Claude Code TTS: Chatterbox is installed, but its PyTorch build runs on the CPU, far slower than speech; this machine has ${driver.gpu}. Install it again for the GPU? That rebuilds its isolated environment (about 3 GB).`,
+        { modal: true },
+        "Install for the GPU"
+      );
+      if (go !== "Install for the GPU") {
+        return false;
+      }
+      await releaseEngine();
+      fs.rmSync(chatterboxVenv(storage), { recursive: true, force: true });
+      if (!(await installChatterboxRuntime(false))) {
+        return false;
+      }
+    }
+  }
   if (installed) {
     const speed =
       installed === "mlx"
@@ -671,10 +795,31 @@ export async function ensureVoiceEngine(what: string): Promise<boolean> {
 
 /** Install Qwen3 if needed, switch to it, and warm the model. */
 export async function setupQwen3Flow(): Promise<boolean> {
+  if (await stoppedByAppControl()) {
+    return false;
+  }
   return setupQwen3({
     log: (line) => runtime.output.appendLine(`[qwen3 setup] ${line}`),
     showLog: () => runtime.output.show(),
-    installTool: (pkg) => installTool(pkg, "Qwen3"),
+    // The PyTorch package gets the torch build for this machine's GPU,
+    // where PyPI's own would leave the model on the CPU.
+    installTool: async (pkg, extra = []) =>
+      installTool(
+        pkg,
+        "Qwen3",
+        pkg === "qwen-tts" && !extra.includes("--index") ? [...extra, ...(await torchIndexForThisMachine())] : extra
+      ),
+    releaseEngine,
+    gpuUpgrade: async () => {
+      const python = findQwen3Python();
+      const cuda = python ? torchHasCuda(venvOf(python)) : undefined;
+      if (cuda !== false) {
+        return undefined;
+      }
+      const driver = await nvidiaDriver();
+      const index = torchIndexFor(driver);
+      return driver && index ? { gpu: driver.gpu, extra: torchIndexArgs(index) } : undefined;
+    },
     modelDownload: qwen3ModelDownload(),
     activate: async () => {
       await applyMachineDefaults(); // before the engine switch: it decides which weights download
@@ -699,6 +844,9 @@ export async function setupQwen3Flow(): Promise<boolean> {
 }
 
 export async function setupKokoroFlow(): Promise<void> {
+  if (await stoppedByAppControl()) {
+    return;
+  }
   if (!(await setupKokoro(runtime.context))) {
     return;
   }
@@ -706,4 +854,31 @@ export async function setupKokoroFlow(): Promise<void> {
     .getConfiguration("claudeCodeTts")
     .update("engine", "kokoro", vscode.ConfigurationTarget.Global);
   runtime.speech?.enqueue("Kokoro is ready. Claude will sound like this from now on.");
+}
+
+/**
+ * Whether Windows Smart App Control is on, off, or still deciding
+ * ("evaluation", which blocks the same files). Asked of the registry here,
+ * with the other questions Check Setup puts to the machine, and only on
+ * Windows: an engine install that will not load is worth a warning before
+ * its gigabytes are downloaded.
+ */
+export function windowsAppControl(): "on" | "evaluation" | "off" | "unknown" {
+  if (!isWindows) {
+    return "off";
+  }
+  try {
+    const r = spawnSync(
+      "reg",
+      ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy", "/v", "VerifiedAndReputablePolicyState"],
+      { encoding: "utf8", timeout: 5000, windowsHide: true }
+    );
+    const value = /VerifiedAndReputablePolicyState\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(r.stdout ?? "")?.[1];
+    if (value === undefined) {
+      return "unknown";
+    }
+    return { 0: "off" as const, 1: "on" as const, 2: "evaluation" as const }[parseInt(value, 16)] ?? "unknown";
+  } catch {
+    return "unknown";
+  }
 }

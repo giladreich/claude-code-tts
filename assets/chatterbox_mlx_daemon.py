@@ -272,7 +272,7 @@ def reader():
                 cancelled.add(req["cancel"])
                 if len(cancelled) > 1000:
                     cancelled.clear()
-            else:
+            elif "id" in req:  # anything else is a message this daemon does not speak
                 req["_queued_at"] = time.time()
                 (urgent if req.get("priority") else background).append(req)
             cv.notify()

@@ -101,19 +101,49 @@ function playerStorageDir() {
   return playerStorage;
 }
 
+/** Where a Python may be on this machine, the uv tool venvs first (their layout differs per platform). */
+function pythonCandidates() {
+  const { uvToolsDir, venvPython } = require(path.join(ROOT, "out", "platform", "platform.js"));
+  const venvs = ["mlx-audio", "sherpa-onnx", "qwen-tts"].map((t) => venvPython(path.join(uvToolsDir(), t)));
+  // A Windows without Python on PATH still answers "python" with the Store's
+  // stub, which exits 9009 with an offer to install one; the interpreters
+  // python.org installs sit here, and a machine may have the one and not
+  // the other.
+  const installed = [];
+  const programs = process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Python");
+  if (programs && fs.existsSync(programs)) {
+    for (const d of fs.readdirSync(programs).sort().reverse()) installed.push(path.join(programs, d, "python.exe"));
+  }
+  return venvs.concat(["python3", "python"], installed);
+}
+
+/** A Python that runs, for the helpers that need nothing but the standard library; undefined when there is none. */
+function plainPython() {
+  for (const p of pythonCandidates()) {
+    const r = spawnSync(p, ["-c", "import sys"], { stdio: "ignore" });
+    if (r.status === 0) return p;
+  }
+  return undefined;
+}
+
 /** Python that can run the daemons' logic against fake model modules. */
 function pythonWithNumpy() {
-  // uv's tool venvs live in different places and use a different layout on
-  // Windows, so the compiled helper decides where to look.
-  const { uvToolsDir, venvPython } = require(path.join(ROOT, "out", "platform", "platform.js"));
-  const candidates = ["mlx-audio", "sherpa-onnx", "qwen-tts"]
-    .map((t) => venvPython(path.join(uvToolsDir(), t)))
-    .concat(["python3", "python"]);
-  for (const p of candidates) {
+  for (const p of pythonCandidates()) {
     const r = spawnSync(p, ["-c", "import numpy"], { stdio: "ignore" });
     if (r.status === 0) return p;
   }
   return undefined;
 }
 
-module.exports = { ROOT, tmpDir, writeWav, sleep, until, isMac, hasSwiftc, playerStorageDir, pythonWithNumpy };
+module.exports = {
+  ROOT,
+  tmpDir,
+  writeWav,
+  sleep,
+  until,
+  isMac,
+  hasSwiftc,
+  playerStorageDir,
+  plainPython,
+  pythonWithNumpy,
+};

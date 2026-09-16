@@ -30,6 +30,13 @@ export function pickWithPreview<T extends vscode.QuickPickItem>(opts: {
    * levels in can be left without starting again from the status bar.
    */
   back?: boolean;
+  /**
+   * Play the first row as the list opens. Off by default (a list must not
+   * speak at someone who has not touched it yet); on for a list whose first
+   * row is the thing that was just made, which is what they are waiting to
+   * hear.
+   */
+  playFirst?: boolean;
 }): Promise<T | "back" | undefined> {
   return new Promise((resolve) => {
     const qp = vscode.window.createQuickPick<T>();
@@ -60,7 +67,7 @@ export function pickWithPreview<T extends vscode.QuickPickItem>(opts: {
       if (!item) {
         return;
       }
-      if (Date.now() - shownAt < 400 && item === qp.items[0]) {
+      if (!opts.playFirst && Date.now() - shownAt < 400 && item === qp.items[0]) {
         return;
       }
       stop();
@@ -144,12 +151,19 @@ export function inputWithBack(
      * length and size an export range comes to, updated as it is typed.
      */
     hint?: (value: string) => string | undefined;
+    /** Hide when the window loses focus; the default keeps the box (see below). */
+    ignoreFocusOut?: boolean;
   },
   back = false
 ): Promise<string | Back | undefined> {
   return new Promise((resolve) => {
     const box = vscode.window.createInputBox();
     box.prompt = opts.prompt;
+    // Text is typed here, and often pasted from elsewhere: switching to
+    // another window to copy it took the focus, the box closed as "back",
+    // the step before it opened and closed the same way, and someone who
+    // pasted a voice description found themselves at the language list.
+    box.ignoreFocusOut = opts.ignoreFocusOut ?? true;
     if (opts.title) {
       box.title = opts.title;
     }
@@ -272,7 +286,7 @@ export function pickManyWithBack<T extends vscode.QuickPickItem>(opts: {
  * What a menu did, so the menu that opened it knows what to do next.
  *
  * "ran" means something happened and this menu should be shown again: most
- * settings are changed one after another (three completion sounds, a voice
+ * settings are changed one after another (three notification sounds, a voice
  * then a rate), and closing the menu after each one made every second change
  * start from the status bar again. "back" is the way out to the menu behind
  * this one, and "closed" ends the whole thing.
@@ -455,6 +469,8 @@ export function livePreviewPicker<T extends vscode.QuickPickItem>(opts: {
         inVoice?: string;
         file?: string;
         volume?: number;
+        /** The language the sample is in, when the caller knows it. */
+        language?: string;
       }
     | undefined;
   accept: (item: T) => Promise<void> | void;
@@ -502,12 +518,17 @@ export function livePreviewPicker<T extends vscode.QuickPickItem>(opts: {
       }
       timer = setTimeout(() => {
         if (s.file) {
-          // Nothing to synthesize and nothing to interrupt: a ready-made
-          // sample is just audio, so it plays at once even with no model on
-          // the machine.
-          runtime.speech?.stopPreview();
+          // Nothing to synthesize: a ready-made sample is just audio, so it
+          // plays at once even with no model on the machine, through the
+          // queue's preview so the player speech uses plays it (it takes
+          // the volume and starts at once) and speech resumes after it.
           playing?.stop();
-          playing = playWavFile(s.file, s.volume ?? config().speechConfig.volume);
+          const volume = s.volume ?? config().speechConfig.volume;
+          if (runtime.speech) {
+            runtime.speech.previewFile(s.file, volume);
+          } else {
+            playing = playWavFile(s.file, volume);
+          }
           return;
         }
         qp.busy = true; // synthesis takes a moment: show that something is coming
@@ -519,7 +540,8 @@ export function livePreviewPicker<T extends vscode.QuickPickItem>(opts: {
             qp.busy = false;
           },
           s.engine,
-          s.inVoice
+          s.inVoice,
+          s.language
         );
       }, opts.debounceMs ?? 250);
     });

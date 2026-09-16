@@ -41,6 +41,8 @@ export interface DiagnosticsInput {
   pythonInstaller: boolean;
   /** tar, which is what exports and imports a voice pack. */
   backups: boolean;
+  /** Windows Smart App Control, which blocks the unsigned files the Python engines are made of. */
+  appControl?: "on" | "evaluation" | "off" | "unknown";
   engine: string;
   engineName: string;
   engineReady: boolean;
@@ -50,6 +52,11 @@ export interface DiagnosticsInput {
   /** Chatterbox runtime in use, and whether its text preparation is installed. */
   chatterboxRuntime: "mlx" | "torch" | undefined;
   chatterboxDiacritizer: boolean;
+  /** The NVIDIA GPU this machine has, when it has one and the PyTorch runtimes could use it. */
+  gpu?: string;
+  /** Whether each PyTorch runtime's torch was built for the GPU; undefined when it is not installed, or is MLX. */
+  qwen3Cuda?: boolean;
+  chatterboxCuda?: boolean;
   /** Whether this window speaks sessions started outside it, and how many windows are open. */
   listenTo: string;
   terminalOwner: boolean;
@@ -150,42 +157,63 @@ export function checkSetup(i: DiagnosticsInput): Capability[] {
     fix: isMac || ffmpeg ? undefined : ffmpegInstall(),
   });
 
+  // A PyTorch runtime built without CUDA on a machine with an NVIDIA GPU runs
+  // the model on the CPU, several times slower than speech: the one setup
+  // fault that makes the engine work and still be unusable.
+  const onCpu = (runtime: "mlx" | "torch" | undefined, cuda: boolean | undefined): boolean =>
+    runtime === "torch" && cuda === false && !!i.gpu;
+  const qwen3OnCpu = onCpu(i.qwen3Runtime, i.qwen3Cuda);
   out.push({
     name: "Voice cloning and design (Qwen3)",
-    status: i.qwen3Runtime ? "ok" : "missing",
-    detail: i.qwen3Runtime
-      ? `${i.qwen3Runtime === "mlx" ? "MLX" : "PyTorch"} runtime, ${i.voices} voice${i.voices === 1 ? "" : "s"} saved`
-      : uv
-        ? "the Python package is not installed"
-        : "not installed; the setup downloads its own Python tooling, nothing to install first",
-    fix: i.qwen3Runtime ? undefined : "set up Qwen3",
-    command: i.qwen3Runtime ? undefined : "claudeCodeTts.setupQwen3",
+    status: !i.qwen3Runtime ? "missing" : qwen3OnCpu ? "partial" : "ok",
+    detail: qwen3OnCpu
+      ? `PyTorch runtime built without the GPU, so it runs on the CPU; this machine has ${i.gpu}`
+      : i.qwen3Runtime
+        ? `${i.qwen3Runtime === "mlx" ? "MLX" : "PyTorch"} runtime, ${i.voices} voice${i.voices === 1 ? "" : "s"} saved`
+        : uv
+          ? "the Python package is not installed"
+          : "not installed; the setup downloads its own Python tooling, nothing to install first",
+    fix: qwen3OnCpu ? "set up Qwen3 again for the GPU" : i.qwen3Runtime ? undefined : "set up Qwen3",
+    command: qwen3OnCpu || !i.qwen3Runtime ? "claudeCodeTts.setupQwen3" : undefined,
   });
 
+  const chatterboxOnCpu = onCpu(i.chatterboxRuntime, i.chatterboxCuda);
   out.push({
     name: "Voice cloning in 23 languages (Chatterbox)",
-    status: !i.chatterboxRuntime ? "missing" : i.voices === 0 ? "partial" : i.chatterboxDiacritizer ? "ok" : "partial",
+    status: !i.chatterboxRuntime
+      ? "missing"
+      : i.voices === 0 || chatterboxOnCpu
+        ? "partial"
+        : i.chatterboxDiacritizer
+          ? "ok"
+          : "partial",
     detail: !i.chatterboxRuntime
       ? "not installed; it speaks 23 languages in a voice you create"
-      : i.voices === 0
-        ? `${i.chatterboxRuntime === "mlx" ? "MLX" : "PyTorch"} runtime installed, but it has no voice to speak with yet`
-        : i.chatterboxDiacritizer
-          ? `${i.chatterboxRuntime === "mlx" ? "MLX" : "PyTorch"} runtime, ${i.voices} voice${i.voices === 1 ? "" : "s"} saved`
-          : "installed, but the text preparation some languages need is missing",
+      : chatterboxOnCpu
+        ? `PyTorch runtime built without the GPU, so it runs on the CPU; this machine has ${i.gpu}`
+        : i.voices === 0
+          ? `${i.chatterboxRuntime === "mlx" ? "MLX" : "PyTorch"} runtime installed, but it has no voice to speak with yet`
+          : i.chatterboxDiacritizer
+            ? `${i.chatterboxRuntime === "mlx" ? "MLX" : "PyTorch"} runtime, ${i.voices} voice${i.voices === 1 ? "" : "s"} saved`
+            : "installed, but the text preparation some languages need is missing",
     fix: !i.chatterboxRuntime
       ? "set up Chatterbox"
-      : i.voices === 0
-        ? "create a voice"
-        : i.chatterboxDiacritizer
-          ? undefined
-          : "set up Chatterbox again",
+      : chatterboxOnCpu
+        ? "set up Chatterbox again for the GPU"
+        : i.voices === 0
+          ? "create a voice"
+          : i.chatterboxDiacritizer
+            ? undefined
+            : "set up Chatterbox again",
     command: !i.chatterboxRuntime
       ? "claudeCodeTts.setupChatterbox"
-      : i.voices === 0
-        ? "claudeCodeTts.manageVoices"
-        : i.chatterboxDiacritizer
-          ? undefined
-          : "claudeCodeTts.setupChatterbox",
+      : chatterboxOnCpu
+        ? "claudeCodeTts.setupChatterbox"
+        : i.voices === 0
+          ? "claudeCodeTts.manageVoices"
+          : i.chatterboxDiacritizer
+            ? undefined
+            : "claudeCodeTts.setupChatterbox",
   });
 
   out.push({
@@ -232,12 +260,27 @@ export function checkSetup(i: DiagnosticsInput): Capability[] {
   });
 
   out.push({
-    name: "Completion sounds",
+    name: "Notification sounds",
     status: i.hooksInstalled ? "ok" : "partial",
     detail: i.hooksInstalled ? "Claude Code hooks installed" : "not enabled",
-    fix: i.hooksInstalled ? undefined : "turn completion sounds on",
+    fix: i.hooksInstalled ? undefined : "turn notification sounds on",
     command: i.hooksInstalled ? undefined : "claudeCodeTts.toggleNotifications",
   });
+
+  if (i.appControl === "on" || i.appControl === "evaluation") {
+    // No fix is offered: the only one is a security setting, and that is
+    // the person's decision (or their administrator's), not this extension's.
+    // The row states the condition. The evaluation period blocks nothing
+    // yet, so it is a note rather than a warning.
+    out.push({
+      name: "Windows Smart App Control",
+      status: i.appControl === "on" ? "partial" : "ok",
+      detail:
+        i.appControl === "on"
+          ? "on: it runs only programs signed by a known publisher, and the neural engines are built from components that are not, so they run only while it is off. The built-in Windows voice keeps working"
+          : "in its evaluation period: nothing is blocked yet. If Windows turns it on at the end, the neural engines run only while it is off again; the built-in Windows voice keeps working either way",
+    });
+  }
 
   out.push({
     name: "Voice backups",

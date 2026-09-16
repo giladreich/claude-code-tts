@@ -69,7 +69,7 @@ export async function removeEverythingFlow(deps: RemoveEverythingDeps): Promise<
     [
       "Remove everything Claude Code TTS added to this machine?",
       "",
-      "- The completion-sound hooks and sound choices under ~/.claude",
+      "- The notification-sound hooks and sound choices under ~/.claude",
       `- Downloaded models, runtimes, helpers and logs (${formatBytes(owned.reduce((n, i) => n + i.bytes, 0))})`,
       "- Every claudeCodeTts.* setting and the spoken history",
       "",

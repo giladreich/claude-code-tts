@@ -11,12 +11,15 @@
  *
  * Totals come from the file listing the runtime writes into the cache before
  * it fetches anything (see expectedBytes), not from a table here that had to
- * be kept in step with the model hubs. A model whose cache has no listing
- * still reports its bytes, just without a percentage.
+ * be kept in step with the model hubs. Where the runtime writes no listing
+ * (huggingface_hub on Windows), the same listing is asked of the hub while
+ * the fetch runs (fetchExpectedBytes); a model with neither still reports
+ * its bytes, just without a percentage.
  */
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { download } from "../tts/net";
 
 const GB = 1024 ** 3;
 
@@ -80,6 +83,64 @@ export function expectedBytes(hub: string, dirName: string): number | undefined 
     }
   }
   return best;
+}
+
+/** The hub id of a cache directory: "models--Qwen--X" is "Qwen/X". */
+export const modelIdOf = (dirName: string): string => dirName.replace(/^models--/, "").replace(/--/g, "/");
+
+/**
+ * The hub's listing of a model's files, with sizes; what the runtime would
+ * have written to `trees`. Asked of the same host the runtime fetches from:
+ * HF_ENDPOINT moves a machine to a mirror, and a mirror-only model must not
+ * be named to the public hub.
+ */
+export const hubTreeUrl = (dirName: string, endpoint = process.env.HF_ENDPOINT): string =>
+  `${(endpoint || "https://huggingface.co").replace(/\/+$/, "")}/api/models/${modelIdOf(dirName)}/tree/main?recursive=true`;
+
+/** The bytes a hub file listing adds up to, or undefined when it is not one. */
+export function totalOfListing(listing: unknown): number | undefined {
+  if (!Array.isArray(listing)) {
+    return undefined;
+  }
+  let total = 0;
+  for (const entry of listing as { type?: string; size?: number; lfs?: { size?: number } }[]) {
+    if (entry?.type === "file") {
+      total += entry.lfs?.size ?? entry.size ?? 0;
+    }
+  }
+  return total > 0 ? total : undefined;
+}
+
+/** Totals asked of the hub, one request per model; a failure is asked again after a minute. */
+const fetchedTotals = new Map<string, { at: number; total: Promise<number | undefined> }>();
+const REFETCH_AFTER_MS = 60_000;
+
+/**
+ * The size of a model from the hub's file listing, for a cache that carries
+ * none (the runtime on Windows writes no `trees`). Asked only while that
+ * model is being fetched, from the same host the weights come from, through
+ * the same proxy; nothing about this machine is sent. Undefined offline, or
+ * for a model the hub does not list.
+ */
+export function fetchExpectedBytes(dirName: string, tmpDir: string = os.tmpdir()): Promise<number | undefined> {
+  const known = fetchedTotals.get(dirName);
+  if (known && (Date.now() - known.at < REFETCH_AFTER_MS || known.at === Infinity)) {
+    return known.total;
+  }
+  const file = path.join(tmpDir, `claude-code-tts-listing-${process.pid}-${Date.now().toString(36)}.json`);
+  const total = download(hubTreeUrl(dirName), file, () => {})
+    .then(() => {
+      const listing = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+      const bytes = totalOfListing(listing);
+      if (bytes !== undefined) {
+        fetchedTotals.set(dirName, { at: Infinity, total: Promise.resolve(bytes) }); // a size does not change
+      }
+      return bytes;
+    })
+    .catch(() => undefined)
+    .finally(() => fs.rm(file, { force: true }, () => {}));
+  fetchedTotals.set(dirName, { at: Date.now(), total });
+  return total;
 }
 
 /**
@@ -281,6 +342,6 @@ export function fractionDone(download: Download): number | undefined {
 
 /** A readable name for the model, for the line the user reads. */
 export function modelLabel(dirName: string): string {
-  const id = dirName.replace(/^models--/, "").replace(/--/g, "/");
+  const id = modelIdOf(dirName);
   return id.split("/").pop() ?? id;
 }

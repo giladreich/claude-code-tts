@@ -31,7 +31,7 @@ Nothing is downloaded until you ask for something that needs it, and each engine
 
 ![Installing downloads nothing and speaks with the system voice. Wanting a natural voice adds Kokoro at 360 MB or Qwen3-TTS at 2.3 GB. Wanting your own voice adds Qwen3-TTS, Whisper at 485 MB to check what you read, and Chatterbox at 3 GB for a language Qwen3 cannot say. Wanting everything in one language adds Argos Translate at 100 MB per language pair.](assets/diagrams/what-downloads.png)
 
-A voice you record or design is one file both cloning engines can speak, so the language you listen in decides the engine, not the voice. Six URLs exist in the whole source tree, four downloads and two documentation links you click yourself, listed in [PRIVACY.md](docs/PRIVACY.md) with the command that proves it.
+A voice you record or design is one file both cloning engines can speak, so the language you listen in decides the engine, not the voice. Eight URLs exist in the whole source tree: five downloads, one file listing that sizes one of them, and two documentation links you click yourself, listed in [PRIVACY.md](docs/PRIVACY.md) with the command that proves it.
 
 **Built with** TypeScript on the VSCode extension host, no runtime npm dependencies. The engines are other people's work, run locally: [Piper](https://github.com/OHF-Voice/piper1-gpl), [Kokoro](https://github.com/k2-fsa/sherpa-onnx) through sherpa-onnx, [Qwen3-TTS](https://huggingface.co/Qwen) and [Chatterbox](https://github.com/resemble-ai/chatterbox) through Python (MLX on Apple Silicon, PyTorch elsewhere), [Whisper](https://github.com/openai/whisper), [Argos Translate](https://github.com/argosopentech/argos-translate). Python tools install with [uv](https://github.com/astral-sh/uv) into the extension's own storage; playback is a Swift helper on macOS, ffplay or sox elsewhere.
 
@@ -50,7 +50,7 @@ A voice you record or design is one file both cloning engines can speak, so the 
 | **System** | a computer | none | Built into macOS, Windows and Linux (espeak). Instant, always available. |
 | **Kokoro** | a person, and fast | 360 MB once | Fast fixed voices. One guided download, no Python. 28 voices. |
 | **Piper** | clear and light | 60-115 MB per voice | Good on weak hardware. One voice file at a time, 30+ languages. |
-| **Qwen3** | expressive | 2.3 GB | **The one to install.** Ten languages, and it speaks as a voice you create. Faster than realtime on Apple Silicon. |
+| **Qwen3** | expressive | 2.3 GB | **The one to install.** Ten languages, and it speaks as a voice you create. Faster than realtime on Apple Silicon and on an NVIDIA GPU. |
 | **Chatterbox** | your voice, anywhere | 3 GB | Install this one instead when you listen in a language Qwen3 does not speak: 23 of them, in a voice you create. Heaviest, slowest to start. |
 
 **Select Voice** speaks a sample as you move through the list, so you choose by ear.
@@ -86,7 +86,7 @@ Claude Code writes the same transcripts wherever it runs, so a session you start
 
 With several windows open, each speaks its own folders and the one open longest speaks everything else, so a terminal session is heard once rather than three times. **Check Setup** says which window is doing it.
 
-Completion sounds are the exception that needs nothing open: they run from Claude Code's own hooks.
+Notification sounds are the exception that needs nothing open: they run from Claude Code's own hooks.
 
 The controls stay in VSCode, except the one you want most from a terminal: `echo mute > ~/.claude/claude-code-tts-control` (also `skip`, `stop`, `pause`, `resume`, `repeat`, `faster`, `slower`, `rate 260`).
 
@@ -96,7 +96,7 @@ Set `claudeCodeTts.listenTo` to `workspace` if you would rather a window only sp
 
 - **Claude Code**: this extension speaks what it writes.
 - **VSCode 1.85** or newer, on macOS, Windows or Linux.
-- Nothing else. Linux needs `espeak-ng` for the system voice; every neural engine installs itself from inside the extension. On Windows and Linux the neural engines play through whatever WAV player is installed, so speed and volume control want `ffplay` (from ffmpeg) or `sox`: [platform support](docs/REFERENCE.md#platform-support) says what works without them.
+- Nothing else. Linux needs `espeak-ng` for the system voice; every neural engine installs itself from inside the extension. On Windows the extension's own player plays the neural engines (streamed, with volume and pause); a rate other than 1x wants `ffplay` (from ffmpeg). On Linux they play through whatever WAV player is installed, so speed and volume want `ffplay` or `sox`: [platform support](docs/REFERENCE.md#platform-support) says what works without them.
 
 ## Shortcuts and commands
 
@@ -136,9 +136,9 @@ The everyday ones are the engine, the rate, the volume and what gets spoken. The
 
 Full table, advanced groups included: [docs/REFERENCE.md](docs/REFERENCE.md#settings).
 
-## Completion sounds
+## Notification sounds
 
-**Menu**, then **Completion sounds**, picks the sound for each event and auditions it as you move through the list. An event you give no sound installs no hook at all, and uninstalling the extension removes the ones it wrote.
+**Menu**, then **Notification sounds**, picks the sound for each event and auditions it as you move through the list: sixty sounds ship with the extension, the same on every platform, next to a file of your own and the system sounds. An event you give no sound installs no hook at all, and uninstalling the extension removes the ones it wrote.
 
 ## Known limitation
 

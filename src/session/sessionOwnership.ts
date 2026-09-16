@@ -27,6 +27,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { sleepSync, transientFsError, writeFileAtomicSync } from "../platform/atomicFile";
 
 export interface WindowRecord {
   id: string;
@@ -88,6 +89,8 @@ export class SessionOwnership {
   private readonly startedAt: number;
   private timer: NodeJS.Timeout | undefined;
   private snapshot: { at: number; records: WindowRecord[] } | undefined;
+  /** The record this window last managed to write, so it can count itself when the listing cannot. */
+  private written: WindowRecord | undefined;
 
   constructor(private opts: OwnershipOptions) {
     this.dir = opts.dir;
@@ -114,6 +117,7 @@ export class SessionOwnership {
       clearInterval(this.timer);
     }
     this.timer = undefined;
+    this.written = undefined;
     try {
       fs.rmSync(this.recordPath(this.id), { force: true });
     } catch {
@@ -165,11 +169,14 @@ export class SessionOwnership {
       dirs: this.opts.dirs().map(normalize),
     };
     try {
-      fs.mkdirSync(this.dir, { recursive: true });
-      // Written aside and renamed: another window must never read half a file.
-      const tmp = `${this.recordPath(this.id)}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(record));
-      fs.renameSync(tmp, this.recordPath(this.id));
+      // Written aside and renamed: another window must never read half a
+      // file. On Windows the rename is refused while another window is
+      // reading the record; the writer retries, because a heartbeat that is
+      // dropped here makes this window disappear from the registry, and a
+      // window that cannot see itself speaks its own folders while the
+      // oldest window speaks them too.
+      writeFileAtomicSync(this.recordPath(this.id), JSON.stringify(record), { fsync: false, copyWhenLocked: true });
+      this.written = record;
       this.snapshot = undefined; // our own entry changed
     } catch {
       /* storage unavailable: owns() then falls back to speaking */
@@ -196,7 +203,7 @@ export class SessionOwnership {
       }
       const file = path.join(this.dir, entry);
       try {
-        const record = JSON.parse(fs.readFileSync(file, "utf8")) as WindowRecord;
+        const record = JSON.parse(readRecord(file)) as WindowRecord;
         if (typeof record?.id !== "string" || typeof record.at !== "number") {
           continue;
         }
@@ -209,8 +216,32 @@ export class SessionOwnership {
         /* half-written or not ours */
       }
     }
+    // A window counts itself from what it last wrote: a listing that misses
+    // its own record (a read refused while the heartbeat was being renamed
+    // into place, a sweep by another window) must not make it leave the
+    // registry and speak alongside the window that then takes its place.
+    if (this.written && !records.some((r) => r.id === this.id) && now - this.written.at <= STALE_MS) {
+      records.push(this.written);
+    }
     this.snapshot = { at: now, records };
     return records;
+  }
+}
+
+/**
+ * A record's text, read again once when Windows refuses the first read: the
+ * window that owns it may be renaming its heartbeat into place at this very
+ * moment, and a record skipped for that is a live window not counted.
+ */
+function readRecord(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if (!transientFsError(e)) {
+      throw e;
+    }
+    sleepSync(10);
+    return fs.readFileSync(file, "utf8");
   }
 }
 

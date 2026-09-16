@@ -1,3 +1,5 @@
+<!-- Pull requests target the dev branch; main moves only when a release is cut from dev. -->
+
 ## What this changes
 
 <!-- One or two sentences. If it fixes an issue, "Fixes #123". -->
@@ -15,7 +17,7 @@
 
 ## Checklist
 
-- [ ] `CHANGELOG.md` has a user-facing entry and `package.json` has the matching version
+- [ ] `CHANGELOG.md` has a user-facing entry under `## [Unreleased]` (the version is set by the release commit, not here)
 - [ ] New settings and commands are in the README tables (`test/unit/docs.test.js` enforces this)
 - [ ] Works, or degrades with a clear message, on macOS, Linux and Windows (see the platform table in the README)
 - [ ] No new runtime dependency; anything optional is detected at runtime with a fix suggested in "Check Setup"

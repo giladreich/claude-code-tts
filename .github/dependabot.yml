@@ -5,6 +5,7 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: "/"
+    target-branch: dev # pull requests go to dev, where CI runs; main moves only at a release
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
@@ -26,6 +27,7 @@ updates:
         update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: dev
     schedule:
       interval: monthly
     groups:

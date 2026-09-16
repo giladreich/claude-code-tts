@@ -45,8 +45,8 @@ The advanced groups are engine internals. Nothing in the everyday groups depends
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `notifications.enabled` | `true` | Completion sounds via Claude Code hooks. The hooks are written to `~/.claude/settings.json` the first time the extension runs, announced once, and removed by the hook script itself when it finds the extension uninstalled. |
-| `notifications.sounds` | `{"done":"Glass","permission":"Funk","question":"Ping","waiting":"Purr"}` | Which sound plays for each event, by name from the system sound library. An event with no entry is silent, and installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one. |
+| `notifications.enabled` | `true` | Notification sounds via Claude Code hooks. The hooks are written to `~/.claude/settings.json` the first time the extension runs, announced once, and removed by the hook script itself when it finds the extension uninstalled. |
+| `notifications.sounds` | `{"done":"builtin/done","permission":"builtin/permission","question":"builtin/question","waiting":"builtin/waiting","tool":"builtin/tool","subagent":"builtin/subagent"}` | Which sound plays for each event: one of the extension's own (`builtin/<name>`: 60 sounds generated for the extension with Stable Audio Open, the same on every platform and 2.6 MB in all, a default and alternatives per event, on for every event but `prompt` unless you change it, listed with a preview in **Configure Notification Sounds**; `assets/sounds/index.json` names them all and `assets/sounds/prompts.json` keeps the prompt and seed behind each), the absolute path of a sound file of yours (WAV everywhere; MP3 on Windows and macOS), or a name from the system sound library. An event with no entry is silent, and installs no hook at all, so Claude Code starts nothing for it. Keys: `done` (Claude finished), `permission` (waiting for your approval), `question` (Claude asked you something), `waiting` (idle reminder), `tool` (a tool from `notifications.toolFilter` ran), `subagent`, `prompt`. Set these with **Claude Code TTS: Configure Notification Sounds**, which auditions each one. |
 | `notifications.toolFilter` | `["Bash"]` | Which tools trigger that sound. |
 | `notifications.volume` | `70` | Notification sound volume, 0-100. |
 
@@ -112,7 +112,7 @@ Fifteen commands are listed in the palette; the others stay registered so that k
 | `setupQwen3` | Set Up Qwen3 Engine |
 | `setupChatterbox` | Set Up Chatterbox Engine |
 | `setupTranslation` | Set Up Translation |
-| `toggleNotifications` | Toggle Completion Sounds |
+| `toggleNotifications` | Toggle Notification Sounds |
 | `configureSounds` | Configure Notification Sounds |
 | `manageVoices` | My Voices |
 | `designVoice` | Design a Voice from a Description |
@@ -194,7 +194,7 @@ The file is named after the date and time and offered in your Downloads folder; 
 | System voice | 0 | instant |
 | Kokoro runtime and model | 360 MB | first words in about half a second; faster than realtime |
 | Piper voice | 60-115 MB each | faster than realtime |
-| Qwen3 0.6B | 2.3 GB | about 0.7x realtime on Apple Silicon (MLX), streamed |
+| Qwen3 0.6B | 2.3 GB | about 0.7x realtime on Apple Silicon (MLX) and 0.75x on a laptop with an NVIDIA GPU (PyTorch), streamed |
 | Qwen3 1.7B | 4.2 GB | about 1.0x realtime, closer to the reference |
 | Qwen3 VoiceDesign | 4.2 GB | only while designing a voice |
 | Chatterbox (MLX) | 3.0 GB | first words in about 2.5 s; whole chunks at 0.6-0.7x realtime |
@@ -238,19 +238,21 @@ Everything core works on macOS, Linux and Windows: transcript tailing, text hand
 | Capability | macOS | Linux | Windows |
 |---|---|---|---|
 | System voice (`say` / `espeak-ng` / `System.Speech`) | yes | yes | yes |
-| Kokoro, Piper, Qwen3, Chatterbox engines | yes | yes | yes (Qwen3 needs `qwen-tts` and Chatterbox its own virtualenv; MLX is Apple-only) |
-| Gapless streaming playback, first audio in ~0.5s | yes (bundled player) | no: audio plays per utterance | no: per utterance |
+| Kokoro, Piper, Qwen3, Chatterbox engines | yes | yes | yes (Qwen3 needs `qwen-tts` and Chatterbox its own virtualenv; MLX is Apple-only; with an NVIDIA GPU the setup installs the PyTorch build that uses it, since the one PyPI ships for Windows runs on the CPU) |
+| Gapless streaming playback, first audio in a second or two | yes (bundled player) | no: audio plays per utterance | yes, without ffplay: a PowerShell player kept for the session plays the parts back to back (about 100 ms between them); with ffplay installed, per utterance through it |
 | Pitch-preserving rate and live rate change | yes | with `ffplay` or `sox` installed | with `ffplay` (from ffmpeg) |
 | Rate without any of those | yes | Kokoro and Piper hit the rate natively; Qwen3 and Chatterbox cannot | same |
-| Volume control | yes | with `ffplay`, `sox` or `paplay` | with `ffplay` (from ffmpeg); otherwise system volume |
-| Pause mid-word | yes | yes | no (finishes the utterance, then holds) |
+| Volume control | yes | with `ffplay`, `sox` or `paplay` | yes |
+| Pause mid-word | yes | yes | yes (the system voice through its speech host, the neural engines through the player kept for the session); with ffplay installed the neural engines finish the utterance, then hold |
 | Clone from the microphone | yes | yes, with `ffmpeg` (PulseAudio or ALSA) | yes, with `ffmpeg` (you pick the input device) |
 | Clone from an audio or video file | yes | yes, with `ffmpeg` installed | yes, with `ffmpeg` installed |
 | Export spoken audio to a file | WAV and M4A without anything installed; MP3, Opus, FLAC and the played tempo with `ffmpeg` | WAV; the rest with `ffmpeg`. The system voice through speech-dispatcher (`spd-say`) writes no audio and cannot be exported; `espeak-ng` can | WAV; the rest with `ffmpeg` |
 | Design a voice from a description | yes | yes | yes |
-| Completion sounds (hooks) | yes, per-event sound choice | yes, per-event choice from the desktop sound themes | yes, per-event choice from `C:\Windows\Media` |
+| Notification sounds (hooks) | yes, per-event sound choice | yes, per-event choice from the desktop sound themes | yes, per-event choice from `C:\Windows\Media` |
 
 Run **Claude Code TTS: Check Setup** to see which of these apply on your machine; a Python tool it lists as missing installs from right there. Installing `ffmpeg` is the one step that brings Linux and Windows close to parity, and the only one the extension asks you to run yourself (it needs your package manager): the prompt opens a terminal with the command typed for you to confirm, for the package manager the machine has (apt, dnf, pacman, zypper, Homebrew, winget). On Windows, restart VSCode after a winget install: the editor's PATH is read when it starts.
+
+On a Windows with Smart App Control on (the default on a new Windows 11 install), the neural engines are not installed: they are built from open-source components Windows will not load while it is on, so the guided setup and the engine list say so up front and the built-in voice stays: the neural engines run only while the setting is off. The setting is the person's, or their administrator's; the extension states the condition and does not ask for it to be changed. When it is switched on with an engine already installed, that engine fails at its next load with the reason explained; switched off again, the engine works without a reload.
 
 Behind a proxy, downloads use VSCode's `http.proxy` setting, or `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from the environment. On Linux under VSCode before 1.90 the editor's Node cannot watch a directory tree, so transcripts are found by scanning every two seconds instead of at once.
 

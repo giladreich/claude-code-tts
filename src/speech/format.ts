@@ -178,6 +178,36 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
 }
 
 /**
+ * A tool announcement of the "verb + argument" shape, taken apart for
+ * translation: the verb phrase in a fuller form the models translate as a
+ * sentence, and the argument to put back after it as written. "Writing" in
+ * front of a placeholder came back from one model as "tag:", every time,
+ * whatever the placeholder looked like; "Writing the file" comes back as
+ * the words. Announcements with a label ("Bash: ...") are handled by the
+ * glossary's label rule and are not taken apart here.
+ */
+export function announcementParts(
+  text: string
+): { phrase: string; argument: string; translateArgument: boolean } | undefined {
+  const shapes: [RegExp, string, boolean][] = [
+    [/^Reading (.+)$/, "Reading the file", false],
+    [/^Writing (.+)$/, "Writing the file", false],
+    [/^Editing (.+)$/, "Editing the file", false],
+    [/^Searching for (.+)$/, "Searching for the pattern", false],
+    [/^Finding files (.+)$/, "Finding files matching", false],
+    [/^Using skill (.+)$/, "Using the skill", false],
+    [/^Searching the web for (.+)$/, "Searching the web for", true],
+  ];
+  for (const [shape, phrase, translateArgument] of shapes) {
+    const m = shape.exec(text);
+    if (m) {
+      return { phrase, argument: m[1], translateArgument };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Prose split at its sentence ends.
  *
  * Sentences end differently across scripts: CJK full stops and their
@@ -195,6 +225,49 @@ export function splitSentences(text: string): string[] {
 
 /** Longest opening part before we split at a clause boundary (chars). */
 const FIRST_PART_MAX = 60;
+
+/**
+ * A clause ends at a comma, semicolon or colon followed by a space (a
+ * thousands separator and a clock time have none: "1,000" and "10:30" are
+ * not two clauses), or at their full-width forms, which the scripts that
+ * use them write without a space after.
+ */
+const CLAUSE_END = /[,;:]\s+|[\uff0c\u3001\uff1b\uff1a]\s*/g;
+
+/**
+ * A sentence far longer than the chunks around it, cut at its clauses into
+ * pieces of at most `max` characters where it has them. On an engine that
+ * generates slower than it speaks, each chunk waits for part of itself
+ * before it plays, so the wait grows with the chunk: a 147-character
+ * sentence in a plan of 90 waited six seconds in one silence, where cut at
+ * its comma it waits twice, briefly, at a place a breath falls anyway. A
+ * stretch without a clause boundary inside the limit stays whole.
+ */
+function splitClauses(sentence: string, max: number, scale: number): string[] {
+  const pieces: string[] = [];
+  let rest = sentence;
+  while (rest.length > max) {
+    let cut = -1;
+    let m: RegExpExecArray | null;
+    CLAUSE_END.lastIndex = 0;
+    while ((m = CLAUSE_END.exec(rest)) !== null) {
+      const end = m.index + m[0].length;
+      if (end > max) {
+        break;
+      }
+      if (m.index >= 15 * scale) {
+        cut = end;
+      }
+    }
+    if (cut < 0 || cut >= rest.length) {
+      break;
+    }
+    pieces.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut);
+  }
+  pieces.push(rest);
+  return pieces;
+}
 
 /**
  * Split cleaned prose into sentence-grouped chunks. A number gives uniform
@@ -234,9 +307,9 @@ export function chunkForSpeech(
     // first audio); otherwise the first one after it, if not absurdly late.
     const first = sentences[0];
     let cut = -1;
-    const re = /[,;:\uff0c\u3001\uff1b\uff1a]\s*/g;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(first)) !== null) {
+    CLAUSE_END.lastIndex = 0;
+    while ((m = CLAUSE_END.exec(first)) !== null) {
       const end = m.index + m[0].length;
       if (end <= FIRST_PART_MAX * scale && m.index >= 15 * scale) {
         cut = end;
@@ -253,6 +326,10 @@ export function chunkForSpeech(
       sentences = [first.slice(cut), ...sentences.slice(1)];
     }
   }
+  // A sentence half again as long as the plan's steady chunk is cut at its
+  // clauses; the rest are grouped whole.
+  const steady = targetAt(targets.length - 1);
+  sentences = sentences.flatMap((s) => (s.length > steady * 1.5 ? splitClauses(s, steady, scale) : [s]));
   let cur = "";
   const join = dense ? "" : " ";
   for (const s of sentences) {

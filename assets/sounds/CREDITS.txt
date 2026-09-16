@@ -1,0 +1,5 @@
+Notification sounds, generated for this extension with Stable Audio Open Small (Stability AI Community License;
+the generated audio is the extension's own, nothing to credit). 24 kHz mono 16-bit WAV.
+prompts.json records the model, prompt, seed and post-processing behind every file, so any of them can be
+regenerated or varied with scripts/sounds/generate.py; index.json lists them for the picker
+(<event>.wav is the event's default, <event>-<n>.wav its alternatives).
